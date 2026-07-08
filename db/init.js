@@ -1119,6 +1119,13 @@ async function migrateFinancialYearsTable() {
       columnNames.add(name)
     }
   }
+
+  if (!columnNames.has('status')) {
+    await query(
+      "ALTER TABLE financial_years ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'active' AFTER statement_type",
+    )
+    columnNames.add('status')
+  }
 }
 
 async function ensureFyScopedCompositePrimaryKey(tableName) {

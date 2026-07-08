@@ -477,7 +477,26 @@ function serializeHistoryRow(row, monthlySchedule) {
 
 export async function getLoansForFs(clientId, fyId, businessId) {
   const rows = await fetchLoanRows(clientId, fyId, businessId)
-  return rows.map((row) => serializeLoanRow(row))
+  if (rows.length) {
+    return rows.map((row) => serializeLoanRow(row))
+  }
+
+  const fsRows = await query(
+    'SELECT payload FROM fs_data WHERE client_id = ? AND fy_id = ? AND business_id = ? LIMIT 1',
+    [clientId, fyId, businessId],
+  )
+
+  if (!fsRows.length) {
+    return []
+  }
+
+  const payload = parseJson(fsRows[0].payload)
+  const legacyLoans = await migrateLegacyRepaymentFromPayload(payload, fyId)
+  if (!legacyLoans.length) {
+    return []
+  }
+
+  return saveLoansForFs(clientId, fyId, businessId, legacyLoans, null)
 }
 
 export async function saveLoansForFs(clientId, fyId, businessId, loans, actor) {

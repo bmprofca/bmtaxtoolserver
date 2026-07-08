@@ -116,7 +116,9 @@ function buildClientFinancialYears(client) {
   const overrides = client.fyClosedOverrides || {}
   const typeOverrides = client.fyStatementTypeOverrides || {}
 
-  return getFinancialYears().map((fy) => ({
+  return getFinancialYears()
+    .filter((fy) => (fy.status || 'active') !== 'inactive')
+    .map((fy) => ({
     ...fy,
     statementType: fy.statementType || typeOverrides[fy.id] || 'Actual',
     closedBusinessIds: overrides[fy.id] || [],

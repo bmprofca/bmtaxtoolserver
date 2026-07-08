@@ -56,6 +56,7 @@ import {
   saveFinancialYears,
   softDeleteFinancialYear,
   updateFinancialYearStatementType,
+  updateFinancialYearStatus,
 } from './data/fySettingsStore.js'
 import {
   getCaProfile,
@@ -67,7 +68,7 @@ import {
   softDeleteCaProfile,
   updateCaProfileStatus,
 } from './data/caSettingsStore.js'
-import { createUser, getUsers, regenerateUserToken, changeUserPassword, updateUserProfile } from './data/userStore.js'
+import { createUser, deactivateUser, getDeletedUsers, getUsers, regenerateUserToken, changeUserPassword, restoreUser, updateAppUser, updateUserProfile } from './data/userStore.js'
 import { hasPermission } from './data/userPermissions.js'
 import { bootstrapDataStores } from './bootstrap.js'
 import { testConnection } from './db/connection.js'
@@ -214,6 +215,15 @@ app.post(
   }),
 )
 
+app.get(
+  '/api/users/deleted',
+  requireAuth,
+  requirePermission('manageUsers'),
+  asyncHandler(async (_req, res) => {
+    res.json({ users: await getDeletedUsers() })
+  }),
+)
+
 app.post(
   '/api/users/:userId/regenerate-token',
   requireAuth,
@@ -223,6 +233,52 @@ app.post(
 
     if (!result.success) {
       return res.status(404).json({ error: result.error })
+    }
+
+    res.json(result)
+  }),
+)
+
+app.put(
+  '/api/users/:userId',
+  requireAuth,
+  requirePermission('manageUsers'),
+  asyncHandler(async (req, res) => {
+    const { name, mobile, userType, password } = req.body
+    const result = await updateAppUser(req.params.userId, { name, mobile, userType, password })
+
+    if (!result.success) {
+      return res.status(400).json({ error: result.error })
+    }
+
+    res.json(result)
+  }),
+)
+
+app.delete(
+  '/api/users/:userId',
+  requireAuth,
+  requirePermission('manageUsers'),
+  asyncHandler(async (req, res) => {
+    const result = await deactivateUser(req.params.userId, req.user.id)
+
+    if (!result.success) {
+      return res.status(400).json({ error: result.error })
+    }
+
+    res.status(204).send()
+  }),
+)
+
+app.post(
+  '/api/users/:userId/restore',
+  requireAuth,
+  requirePermission('manageUsers'),
+  asyncHandler(async (req, res) => {
+    const result = await restoreUser(req.params.userId)
+
+    if (!result.success) {
+      return res.status(400).json({ error: result.error })
     }
 
     res.json(result)
@@ -512,13 +568,52 @@ app.patch(
   requireAuth,
   asyncHandler(async (req, res) => {
     const { fyId } = req.params
-    const { statementType } = req.body
+    const { statementType, status } = req.body
+
+    if (status !== undefined) {
+      if (!hasPermission(req.user, 'manageSettings')) {
+        return res.status(403).json({ error: 'You do not have permission for this action' })
+      }
+
+      if (status !== 'active' && status !== 'inactive') {
+        return res.status(400).json({ error: 'status must be active or inactive' })
+      }
+
+      const financialYear = await updateFinancialYearStatus(fyId, status, req.user)
+
+      if (!financialYear) {
+        return res.status(404).json({ error: 'Financial year not found' })
+      }
+
+      return res.json({ financialYear })
+    }
 
     if (statementType === undefined) {
-      return res.status(400).json({ error: 'statementType is required' })
+      return res.status(400).json({ error: 'statementType or status is required' })
     }
 
     const financialYear = await updateFinancialYearStatementType(fyId, statementType, req.user)
+
+    if (!financialYear) {
+      return res.status(404).json({ error: 'Financial year not found' })
+    }
+
+    res.json({ financialYear })
+  }),
+)
+
+app.patch(
+  '/api/settings/financial-years/:fyId/status',
+  requireAuth,
+  requirePermission('manageSettings'),
+  asyncHandler(async (req, res) => {
+    const { status } = req.body
+
+    if (status !== 'active' && status !== 'inactive') {
+      return res.status(400).json({ error: 'status must be active or inactive' })
+    }
+
+    const financialYear = await updateFinancialYearStatus(req.params.fyId, status, req.user)
 
     if (!financialYear) {
       return res.status(404).json({ error: 'Financial year not found' })

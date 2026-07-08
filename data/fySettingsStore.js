@@ -1,8 +1,12 @@
 import { query } from '../db/connection.js'
 import { getSetting } from '../db/init.js'
 
-const FY_COLUMNS = `id, label, start_year, end_year, statement_type,
+const FY_COLUMNS = `id, label, start_year, end_year, statement_type, status,
   is_deleted, deleted_at, created_at`
+
+function normalizeFyStatus(value) {
+  return value === 'inactive' ? 'inactive' : 'active'
+}
 
 let globalFinancialYears = []
 
@@ -40,6 +44,7 @@ function normalizeFinancialYear(raw) {
     startYear,
     endYear,
     statementType: String(raw.statementType ?? raw.statement_type ?? 'Actual').trim() || 'Actual',
+    status: normalizeFyStatus(raw.status),
     createdAt: raw.createdAt || raw.created_at || new Date().toISOString(),
   }
 }
@@ -51,6 +56,7 @@ function rowToFinancialYear(row) {
     startYear: Number(row.start_year),
     endYear: Number(row.end_year),
     statementType: row.statement_type || 'Actual',
+    status: normalizeFyStatus(row.status),
     isDeleted: row.is_deleted === 1 || row.is_deleted === true,
     deletedAt: row.deleted_at ? new Date(row.deleted_at).toISOString() : null,
     createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
@@ -64,6 +70,7 @@ function serializeFinancialYear(fy) {
     startYear: fy.startYear,
     endYear: fy.endYear,
     statementType: fy.statementType || 'Actual',
+    status: normalizeFyStatus(fy.status),
     createdAt: fy.createdAt,
   }
 }
@@ -133,16 +140,17 @@ async function insertFinancialYear(fy, actor) {
 
   await query(
     `INSERT INTO financial_years (
-       id, label, start_year, end_year, statement_type,
+       id, label, start_year, end_year, statement_type, status,
        is_deleted, deleted_at, created_at,
        created_by_user_id, created_by_username, created_by_name
-     ) VALUES (?, ?, ?, ?, ?, 0, NULL, COALESCE(?, CURRENT_TIMESTAMP), ?, ?, ?)`,
+     ) VALUES (?, ?, ?, ?, ?, ?, 0, NULL, COALESCE(?, CURRENT_TIMESTAMP), ?, ?, ?)`,
     [
       fy.id,
       fy.label,
       fy.startYear,
       fy.endYear,
       fy.statementType,
+      normalizeFyStatus(fy.status),
       fy.createdAt ? new Date(fy.createdAt) : null,
       createdBy.userId,
       createdBy.username,
@@ -161,6 +169,7 @@ async function updateFinancialYearRow(fy, actor) {
        start_year = ?,
        end_year = ?,
        statement_type = ?,
+       status = ?,
        updated_by_user_id = ?,
        updated_by_username = ?,
        updated_by_name = ?,
@@ -171,6 +180,7 @@ async function updateFinancialYearRow(fy, actor) {
       fy.startYear,
       fy.endYear,
       fy.statementType,
+      normalizeFyStatus(fy.status),
       updatedBy.userId,
       updatedBy.username,
       updatedBy.name,
@@ -232,9 +242,9 @@ export async function migrateFinancialYearsFromSettings() {
 
     await query(
       `INSERT INTO financial_years (
-         id, label, start_year, end_year, statement_type,
+         id, label, start_year, end_year, statement_type, status,
          is_deleted, deleted_at, created_at
-       ) VALUES (?, ?, ?, ?, ?, 0, NULL, COALESCE(?, CURRENT_TIMESTAMP))`,
+       ) VALUES (?, ?, ?, ?, ?, 'active', 0, NULL, COALESCE(?, CURRENT_TIMESTAMP))`,
       [
         fy.id,
         fy.label,
@@ -288,13 +298,14 @@ export async function saveFinancialYears(financialYears, actor) {
     .sort((a, b) => a.startYear - b.startYear)
 
   const existingRows = await fetchFinancialYearRows('WHERE is_deleted = 0')
-  const existingIds = new Set(existingRows.map((row) => row.id))
+  const existingById = new Map(existingRows.map((row) => [row.id, rowToFinancialYear(row)]))
 
   for (const fy of normalized) {
-    if (existingIds.has(fy.id)) {
-      await updateFinancialYearRow(fy, actor)
+    const existing = existingById.get(fy.id)
+    if (existing) {
+      await updateFinancialYearRow({ ...existing, ...fy, status: existing.status }, actor)
     } else {
-      await insertFinancialYear(fy, actor)
+      await insertFinancialYear({ ...fy, status: 'active' }, actor)
     }
   }
 
@@ -329,6 +340,24 @@ export async function updateFinancialYearStatementType(fyId, statementType, acto
   }
 
   await updateFinancialYearRow({ ...existing, statementType: normalized }, actor)
+  await reloadActiveFinancialYears()
+  return getFinancialYearById(fyId)
+}
+
+export async function updateFinancialYearStatus(fyId, status, actor) {
+  const existing = getFinancialYearById(fyId)
+
+  if (!existing) {
+    return null
+  }
+
+  const normalizedStatus = normalizeFyStatus(status)
+
+  if (normalizeFyStatus(existing.status) === normalizedStatus) {
+    return existing
+  }
+
+  await updateFinancialYearRow({ ...existing, status: normalizedStatus }, actor)
   await reloadActiveFinancialYears()
   return getFinancialYearById(fyId)
 }

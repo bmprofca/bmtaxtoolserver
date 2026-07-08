@@ -283,7 +283,26 @@ function serializeHistoryRow(row) {
 
 export async function getBankAccountsForFs(clientId, fyId, businessId) {
   const rows = await fetchBankAccountRows(clientId, fyId, businessId)
-  return rows.map((row) => serializeBankAccountRow(row))
+  if (rows.length) {
+    return rows.map((row) => serializeBankAccountRow(row))
+  }
+
+  const fsRows = await query(
+    'SELECT payload FROM fs_data WHERE client_id = ? AND fy_id = ? AND business_id = ? LIMIT 1',
+    [clientId, fyId, businessId],
+  )
+
+  if (!fsRows.length) {
+    return []
+  }
+
+  const payload = parseJson(fsRows[0].payload)
+  const bankAccounts = payload?.bankAccounts
+  if (!Array.isArray(bankAccounts) || bankAccounts.length === 0) {
+    return []
+  }
+
+  return saveBankAccountsForFs(clientId, fyId, businessId, bankAccounts, null)
 }
 
 export async function saveBankAccountsForFs(clientId, fyId, businessId, bankAccounts, actor) {

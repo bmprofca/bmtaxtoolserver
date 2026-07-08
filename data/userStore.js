@@ -62,7 +62,18 @@ export async function getUsers() {
   const rows = await query(
     `SELECT id, username, mobile, name, user_type, user_token, created_at, is_active
      FROM users
+     WHERE is_active = 1
      ORDER BY created_at ASC, username ASC`,
+  )
+  return rows.map((row) => serializeUser(row))
+}
+
+export async function getDeletedUsers() {
+  const rows = await query(
+    `SELECT id, username, mobile, name, user_type, user_token, created_at, is_active
+     FROM users
+     WHERE is_active = 0
+     ORDER BY created_at DESC, username ASC`,
   )
   return rows.map((row) => serializeUser(row))
 }
@@ -191,6 +202,72 @@ export async function updateUserProfile(userId, { name, mobile }) {
     userId,
   ])
 
+  const updated = await getUserById(userId)
+  return { success: true, user: serializeUser(updated) }
+}
+
+export async function updateAppUser(userId, { name, mobile, userType, password }) {
+  const user = await getUserById(userId)
+  if (!user || user.is_active === 0) {
+    return { success: false, error: 'User not found' }
+  }
+
+  const displayName = String(name || '').trim()
+  const normalizedMobile = normalizeMobile(mobile)
+  const normalizedUserType = normalizeUserType(userType)
+
+  if (!displayName) {
+    return { success: false, error: 'Name is required' }
+  }
+
+  if (!normalizedMobile) {
+    return { success: false, error: 'Mobile number is required' }
+  }
+
+  const updates = ['name = ?', 'mobile = ?', 'user_type = ?']
+  const params = [displayName, normalizedMobile, normalizedUserType]
+
+  const plainPassword = String(password || '')
+  if (plainPassword) {
+    if (plainPassword.length < 6) {
+      return { success: false, error: 'Password must be at least 6 characters' }
+    }
+    updates.push('password_hash = ?')
+    params.push(await hashPassword(plainPassword))
+  }
+
+  params.push(userId)
+  await query(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, params)
+
+  const updated = await getUserById(userId)
+  return { success: true, user: serializeUser(updated) }
+}
+
+export async function deactivateUser(userId, requesterId) {
+  const user = await getUserById(userId)
+  if (!user || user.is_active === 0) {
+    return { success: false, error: 'User not found' }
+  }
+
+  if (requesterId && userId === requesterId) {
+    return { success: false, error: 'You cannot delete your own account' }
+  }
+
+  await query('UPDATE users SET is_active = 0 WHERE id = ?', [userId])
+  return { success: true }
+}
+
+export async function restoreUser(userId) {
+  const user = await getUserById(userId)
+  if (!user) {
+    return { success: false, error: 'User not found' }
+  }
+
+  if (user.is_active !== 0) {
+    return { success: false, error: 'User is already active' }
+  }
+
+  await query('UPDATE users SET is_active = 1 WHERE id = ?', [userId])
   const updated = await getUserById(userId)
   return { success: true, user: serializeUser(updated) }
 }
