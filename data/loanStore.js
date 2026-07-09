@@ -410,10 +410,11 @@ async function upsertLoanHistory(
        lender, loan_type, opening_balance, disbursement, disbursement_date,
        interest_rate, tenure_months, emi_start_date, prepayment_amount, prepayment_date,
        emi_amount, interest_for_year, principal_repaid, closing_balance,
+       schedule_closing_balance, closing_adj_principal_applied, closing_adj_interest_applied,
        closing_adj_enabled, closing_adj_mode, closing_adj_principal, closing_adj_interest,
        closing_adj_target_balance, monthly_schedule,
        created_by_user_id, created_by_username, created_by_name
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE
        fy_label = VALUES(fy_label),
        fy_start_year = VALUES(fy_start_year),
@@ -431,6 +432,9 @@ async function upsertLoanHistory(
        interest_for_year = VALUES(interest_for_year),
        principal_repaid = VALUES(principal_repaid),
        closing_balance = VALUES(closing_balance),
+       schedule_closing_balance = VALUES(schedule_closing_balance),
+       closing_adj_principal_applied = VALUES(closing_adj_principal_applied),
+       closing_adj_interest_applied = VALUES(closing_adj_interest_applied),
        closing_adj_enabled = VALUES(closing_adj_enabled),
        closing_adj_mode = VALUES(closing_adj_mode),
        closing_adj_principal = VALUES(closing_adj_principal),
@@ -463,6 +467,9 @@ async function upsertLoanHistory(
       computed.interestForYear,
       computed.principalRepaid,
       computed.closingBalance,
+      n(computed.scheduleClosingBalance ?? computed.closingBalance),
+      n(computed.closingAdjustmentPrincipalApplied),
+      n(computed.closingAdjustmentInterestApplied),
       normalized.closingAdjustmentEnabled ? 1 : 0,
       normalized.closingAdjustmentMode,
       normalized.closingAdjustmentPrincipal,
@@ -550,6 +557,9 @@ function serializeHistoryRow(row, monthlySchedule) {
     interestForYear: n(row.interest_for_year),
     principalRepaid: n(row.principal_repaid),
     closingBalance: n(row.closing_balance),
+    scheduleClosingBalance: n(row.schedule_closing_balance ?? row.closing_balance),
+    closingAdjustmentPrincipalApplied: n(row.closing_adj_principal_applied),
+    closingAdjustmentInterestApplied: n(row.closing_adj_interest_applied),
     monthlySchedule: monthlySchedule || [],
   }
 }
@@ -646,6 +656,7 @@ export async function getLoanHistory(clientId, businessId, loanId = null) {
                     lender, loan_type, opening_balance, disbursement, disbursement_date,
                     interest_rate, tenure_months, emi_start_date, prepayment_amount, prepayment_date,
                     emi_amount, interest_for_year, principal_repaid, closing_balance,
+                    schedule_closing_balance, closing_adj_principal_applied, closing_adj_interest_applied,
                     closing_adj_enabled, closing_adj_mode, closing_adj_principal, closing_adj_interest,
                     closing_adj_target_balance, monthly_schedule,
                     created_at, updated_at

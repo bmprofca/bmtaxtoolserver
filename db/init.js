@@ -571,11 +571,14 @@ export async function initDatabase() {
       interest_for_year DECIMAL(18, 2) NOT NULL DEFAULT 0,
       principal_repaid DECIMAL(18, 2) NOT NULL DEFAULT 0,
       closing_balance DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      schedule_closing_balance DECIMAL(18, 2) NOT NULL DEFAULT 0,
       closing_adj_enabled TINYINT(1) NOT NULL DEFAULT 0,
       closing_adj_mode VARCHAR(32) NOT NULL DEFAULT 'principal-interest',
       closing_adj_principal DECIMAL(18, 2) NOT NULL DEFAULT 0,
       closing_adj_interest DECIMAL(18, 2) NOT NULL DEFAULT 0,
       closing_adj_target_balance DECIMAL(18, 2) NULL,
+      closing_adj_principal_applied DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      closing_adj_interest_applied DECIMAL(18, 2) NOT NULL DEFAULT 0,
       monthly_schedule JSON NOT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       created_by_user_id VARCHAR(50) NULL,
@@ -1328,6 +1331,25 @@ async function migrateLoanTables() {
   ]
 
   for (const [name, definition] of loanHistoryClosingAdjColumns) {
+    if (!loanHistoryColumnNames.has(name)) {
+      await query(`ALTER TABLE loan_history ADD COLUMN ${name} ${definition}`)
+      loanHistoryColumnNames.add(name)
+    }
+  }
+
+  const loanHistoryComputedColumns = [
+    ['schedule_closing_balance', 'DECIMAL(18, 2) NOT NULL DEFAULT 0 AFTER closing_balance'],
+    [
+      'closing_adj_principal_applied',
+      'DECIMAL(18, 2) NOT NULL DEFAULT 0 AFTER closing_adj_target_balance',
+    ],
+    [
+      'closing_adj_interest_applied',
+      'DECIMAL(18, 2) NOT NULL DEFAULT 0 AFTER closing_adj_principal_applied',
+    ],
+  ]
+
+  for (const [name, definition] of loanHistoryComputedColumns) {
     if (!loanHistoryColumnNames.has(name)) {
       await query(`ALTER TABLE loan_history ADD COLUMN ${name} ${definition}`)
       loanHistoryColumnNames.add(name)
