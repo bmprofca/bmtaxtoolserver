@@ -528,6 +528,11 @@ export async function initDatabase() {
       prepayment_amount DECIMAL(18, 2) NOT NULL DEFAULT 0,
       prepayment_date DATE NULL,
       is_closed TINYINT(1) NOT NULL DEFAULT 0,
+      closing_adj_enabled TINYINT(1) NOT NULL DEFAULT 0,
+      closing_adj_mode VARCHAR(32) NOT NULL DEFAULT 'principal-interest',
+      closing_adj_principal DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      closing_adj_interest DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      closing_adj_target_balance DECIMAL(18, 2) NULL,
       sort_order INT NOT NULL DEFAULT 0,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       created_by_user_id VARCHAR(50) NULL,
@@ -566,6 +571,11 @@ export async function initDatabase() {
       interest_for_year DECIMAL(18, 2) NOT NULL DEFAULT 0,
       principal_repaid DECIMAL(18, 2) NOT NULL DEFAULT 0,
       closing_balance DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      closing_adj_enabled TINYINT(1) NOT NULL DEFAULT 0,
+      closing_adj_mode VARCHAR(32) NOT NULL DEFAULT 'principal-interest',
+      closing_adj_principal DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      closing_adj_interest DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      closing_adj_target_balance DECIMAL(18, 2) NULL,
       monthly_schedule JSON NOT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       created_by_user_id VARCHAR(50) NULL,
@@ -1289,6 +1299,39 @@ async function migrateLoanTables() {
     await query(
       'ALTER TABLE loan_records ADD COLUMN is_closed TINYINT(1) NOT NULL DEFAULT 0 AFTER prepayment_date',
     )
+    loanRecordColumnNames.add('is_closed')
+  }
+
+  const loanClosingAdjColumns = [
+    ['closing_adj_enabled', 'TINYINT(1) NOT NULL DEFAULT 0 AFTER is_closed'],
+    ['closing_adj_mode', "VARCHAR(32) NOT NULL DEFAULT 'principal-interest' AFTER closing_adj_enabled"],
+    ['closing_adj_principal', 'DECIMAL(18, 2) NOT NULL DEFAULT 0 AFTER closing_adj_mode'],
+    ['closing_adj_interest', 'DECIMAL(18, 2) NOT NULL DEFAULT 0 AFTER closing_adj_principal'],
+    ['closing_adj_target_balance', 'DECIMAL(18, 2) NULL AFTER closing_adj_interest'],
+  ]
+
+  for (const [name, definition] of loanClosingAdjColumns) {
+    if (!loanRecordColumnNames.has(name)) {
+      await query(`ALTER TABLE loan_records ADD COLUMN ${name} ${definition}`)
+      loanRecordColumnNames.add(name)
+    }
+  }
+
+  let loanHistoryColumns = await query('SHOW COLUMNS FROM loan_history')
+  let loanHistoryColumnNames = new Set(loanHistoryColumns.map((col) => col.Field))
+  const loanHistoryClosingAdjColumns = [
+    ['closing_adj_enabled', 'TINYINT(1) NOT NULL DEFAULT 0 AFTER closing_balance'],
+    ['closing_adj_mode', "VARCHAR(32) NOT NULL DEFAULT 'principal-interest' AFTER closing_adj_enabled"],
+    ['closing_adj_principal', 'DECIMAL(18, 2) NOT NULL DEFAULT 0 AFTER closing_adj_mode'],
+    ['closing_adj_interest', 'DECIMAL(18, 2) NOT NULL DEFAULT 0 AFTER closing_adj_principal'],
+    ['closing_adj_target_balance', 'DECIMAL(18, 2) NULL AFTER closing_adj_interest'],
+  ]
+
+  for (const [name, definition] of loanHistoryClosingAdjColumns) {
+    if (!loanHistoryColumnNames.has(name)) {
+      await query(`ALTER TABLE loan_history ADD COLUMN ${name} ${definition}`)
+      loanHistoryColumnNames.add(name)
+    }
   }
 
   await ensureFyScopedCompositePrimaryKey('loan_records')

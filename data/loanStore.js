@@ -11,7 +11,9 @@ import {
 
 const LOAN_COLUMNS = `id, client_id, fy_id, business_id, lender, loan_type,
   opening_balance, disbursement, disbursement_date, interest_rate, tenure_months,
-  emi_start_date, prepayment_amount, prepayment_date, is_closed, sort_order, created_at, updated_at`
+  emi_start_date, prepayment_amount, prepayment_date, is_closed,
+  closing_adj_enabled, closing_adj_mode, closing_adj_principal, closing_adj_interest,
+  closing_adj_target_balance, sort_order, created_at, updated_at`
 
 const LOAN_TYPES = new Set(['long-term', 'short-term'])
 
@@ -65,7 +67,14 @@ function normalizeLoanType(value) {
   return LOAN_TYPES.has(normalized) ? normalized : 'long-term'
 }
 
+function normalizeClosingAdjustmentMode(value) {
+  return value === 'target-balance' ? 'target-balance' : 'principal-interest'
+}
+
 export function normalizeLoanRecord(raw = {}) {
+  const closingAdjustmentEnabled = Boolean(
+    raw.closingAdjustmentEnabled ?? raw.closing_adj_enabled,
+  )
   return {
     id: String(raw.id || generateId()).trim(),
     lender: String(raw.lender ?? '').trim(),
@@ -78,6 +87,15 @@ export function normalizeLoanRecord(raw = {}) {
     emiStartDate: toDateString(raw.emiStartDate ?? raw.emi_start_date),
     prepaymentAmount: n(raw.prepaymentAmount ?? raw.prepayment_amount),
     prepaymentDate: toDateString(raw.prepaymentDate ?? raw.prepayment_date),
+    closingAdjustmentEnabled,
+    closingAdjustmentMode: normalizeClosingAdjustmentMode(
+      raw.closingAdjustmentMode ?? raw.closing_adj_mode,
+    ),
+    closingAdjustmentPrincipal: n(raw.closingAdjustmentPrincipal ?? raw.closing_adj_principal),
+    closingAdjustmentInterest: n(raw.closingAdjustmentInterest ?? raw.closing_adj_interest),
+    closingAdjustmentTargetBalance: n(
+      raw.closingAdjustmentTargetBalance ?? raw.closing_adj_target_balance,
+    ),
   }
 }
 
@@ -109,6 +127,11 @@ function serializeLoanRow(row) {
     emiStartDate: row.emi_start_date,
     prepaymentAmount: row.prepayment_amount,
     prepaymentDate: row.prepayment_date,
+    closingAdjustmentEnabled: row.closing_adj_enabled,
+    closingAdjustmentMode: row.closing_adj_mode,
+    closingAdjustmentPrincipal: row.closing_adj_principal,
+    closingAdjustmentInterest: row.closing_adj_interest,
+    closingAdjustmentTargetBalance: row.closing_adj_target_balance,
   })
 }
 
@@ -147,9 +170,11 @@ async function insertLoanRow(clientId, fyId, businessId, loan, sortOrder, isClos
     `INSERT INTO loan_records (
        id, client_id, fy_id, business_id, lender, loan_type,
        opening_balance, disbursement, disbursement_date, interest_rate, tenure_months,
-       emi_start_date, prepayment_amount, prepayment_date, is_closed, sort_order,
+       emi_start_date, prepayment_amount, prepayment_date, is_closed,
+       closing_adj_enabled, closing_adj_mode, closing_adj_principal, closing_adj_interest,
+       closing_adj_target_balance, sort_order,
        created_by_user_id, created_by_username, created_by_name
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       normalized.id,
       clientId,
@@ -166,6 +191,13 @@ async function insertLoanRow(clientId, fyId, businessId, loan, sortOrder, isClos
       normalized.prepaymentAmount,
       toDateString(normalized.prepaymentDate) || null,
       isClosed ? 1 : 0,
+      normalized.closingAdjustmentEnabled ? 1 : 0,
+      normalized.closingAdjustmentMode,
+      normalized.closingAdjustmentPrincipal,
+      normalized.closingAdjustmentInterest,
+      normalized.closingAdjustmentEnabled && normalized.closingAdjustmentMode === 'target-balance'
+        ? normalized.closingAdjustmentTargetBalance
+        : null,
       sortOrder,
       userId,
       username,
@@ -191,6 +223,11 @@ async function updateLoanRow(clientId, fyId, businessId, loan, sortOrder, isClos
          prepayment_amount = ?,
          prepayment_date = ?,
          is_closed = ?,
+         closing_adj_enabled = ?,
+         closing_adj_mode = ?,
+         closing_adj_principal = ?,
+         closing_adj_interest = ?,
+         closing_adj_target_balance = ?,
          sort_order = ?,
          updated_by_user_id = ?,
          updated_by_username = ?,
@@ -209,6 +246,13 @@ async function updateLoanRow(clientId, fyId, businessId, loan, sortOrder, isClos
       normalized.prepaymentAmount,
       toDateString(normalized.prepaymentDate) || null,
       isClosed ? 1 : 0,
+      normalized.closingAdjustmentEnabled ? 1 : 0,
+      normalized.closingAdjustmentMode,
+      normalized.closingAdjustmentPrincipal,
+      normalized.closingAdjustmentInterest,
+      normalized.closingAdjustmentEnabled && normalized.closingAdjustmentMode === 'target-balance'
+        ? normalized.closingAdjustmentTargetBalance
+        : null,
       sortOrder,
       userId,
       username,
@@ -365,9 +409,11 @@ async function upsertLoanHistory(
        id, client_id, business_id, fy_id, fy_label, fy_start_year, loan_id,
        lender, loan_type, opening_balance, disbursement, disbursement_date,
        interest_rate, tenure_months, emi_start_date, prepayment_amount, prepayment_date,
-       emi_amount, interest_for_year, principal_repaid, closing_balance, monthly_schedule,
+       emi_amount, interest_for_year, principal_repaid, closing_balance,
+       closing_adj_enabled, closing_adj_mode, closing_adj_principal, closing_adj_interest,
+       closing_adj_target_balance, monthly_schedule,
        created_by_user_id, created_by_username, created_by_name
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE
        fy_label = VALUES(fy_label),
        fy_start_year = VALUES(fy_start_year),
@@ -385,6 +431,11 @@ async function upsertLoanHistory(
        interest_for_year = VALUES(interest_for_year),
        principal_repaid = VALUES(principal_repaid),
        closing_balance = VALUES(closing_balance),
+       closing_adj_enabled = VALUES(closing_adj_enabled),
+       closing_adj_mode = VALUES(closing_adj_mode),
+       closing_adj_principal = VALUES(closing_adj_principal),
+       closing_adj_interest = VALUES(closing_adj_interest),
+       closing_adj_target_balance = VALUES(closing_adj_target_balance),
        monthly_schedule = VALUES(monthly_schedule),
        updated_by_user_id = VALUES(updated_by_user_id),
        updated_by_username = VALUES(updated_by_username),
@@ -412,6 +463,13 @@ async function upsertLoanHistory(
       computed.interestForYear,
       computed.principalRepaid,
       computed.closingBalance,
+      normalized.closingAdjustmentEnabled ? 1 : 0,
+      normalized.closingAdjustmentMode,
+      normalized.closingAdjustmentPrincipal,
+      normalized.closingAdjustmentInterest,
+      normalized.closingAdjustmentEnabled && normalized.closingAdjustmentMode === 'target-balance'
+        ? normalized.closingAdjustmentTargetBalance
+        : null,
       JSON.stringify([]),
       userId,
       username,
@@ -474,6 +532,11 @@ function serializeHistoryRow(row, monthlySchedule) {
     emiStartDate: row.emi_start_date,
     prepaymentAmount: row.prepayment_amount,
     prepaymentDate: row.prepayment_date,
+    closingAdjustmentEnabled: row.closing_adj_enabled,
+    closingAdjustmentMode: row.closing_adj_mode,
+    closingAdjustmentPrincipal: row.closing_adj_principal,
+    closingAdjustmentInterest: row.closing_adj_interest,
+    closingAdjustmentTargetBalance: row.closing_adj_target_balance,
   })
 
   return {
@@ -582,7 +645,9 @@ export async function getLoanHistory(clientId, businessId, loanId = null) {
   let sql = `SELECT id, client_id, business_id, fy_id, fy_label, fy_start_year, loan_id,
                     lender, loan_type, opening_balance, disbursement, disbursement_date,
                     interest_rate, tenure_months, emi_start_date, prepayment_amount, prepayment_date,
-                    emi_amount, interest_for_year, principal_repaid, closing_balance, monthly_schedule,
+                    emi_amount, interest_for_year, principal_repaid, closing_balance,
+                    closing_adj_enabled, closing_adj_mode, closing_adj_principal, closing_adj_interest,
+                    closing_adj_target_balance, monthly_schedule,
                     created_at, updated_at
              FROM loan_history
              WHERE client_id = ? AND business_id = ?`

@@ -254,6 +254,57 @@ export function computeFullLoanSchedule(input, fyStartYear) {
   return schedule
 }
 
+function normalizeClosingAdjustmentMode(value) {
+  return value === 'target-balance' ? 'target-balance' : 'principal-interest'
+}
+
+function defaultClosingAdjustmentFields() {
+  return {
+    closingAdjustmentEnabled: false,
+    closingAdjustmentMode: 'principal-interest',
+    closingAdjustmentPrincipal: 0,
+    closingAdjustmentInterest: 0,
+    closingAdjustmentTargetBalance: 0,
+  }
+}
+
+export function applyClosingBalanceAdjustments(computed, input) {
+  if (!input.closingAdjustmentEnabled) {
+    return {
+      interestForYear: computed.interestForYear,
+      principalRepaid: computed.principalRepaid,
+      closingBalance: computed.closingBalance,
+      principalAdjustment: 0,
+      interestAdjustment: 0,
+      scheduleClosingBalance: computed.closingBalance,
+    }
+  }
+
+  if (input.closingAdjustmentMode === 'target-balance') {
+    const target = Math.max(0, n(input.closingAdjustmentTargetBalance))
+    const principalAdjustment = computed.closingBalance - target
+    return {
+      interestForYear: computed.interestForYear,
+      principalRepaid: computed.principalRepaid + principalAdjustment,
+      closingBalance: target,
+      principalAdjustment,
+      interestAdjustment: 0,
+      scheduleClosingBalance: computed.closingBalance,
+    }
+  }
+
+  const principalAdjustment = n(input.closingAdjustmentPrincipal)
+  const interestAdjustment = n(input.closingAdjustmentInterest)
+  return {
+    interestForYear: computed.interestForYear + interestAdjustment,
+    principalRepaid: computed.principalRepaid + principalAdjustment,
+    closingBalance: Math.max(0, computed.closingBalance - principalAdjustment),
+    principalAdjustment,
+    interestAdjustment,
+    scheduleClosingBalance: computed.closingBalance,
+  }
+}
+
 export function computeLoanForFinancialYear(input, fyStartYear, fyEndYear) {
   const resolvedEmiStartDate = resolveEmiStartDate(input, fyStartYear)
   const fullSchedule = computeFullLoanSchedule(input, fyStartYear)
@@ -285,6 +336,11 @@ export function computeLoanForFinancialYear(input, fyStartYear, fyEndYear) {
   const baseForEmi = balance > 0 ? balance : n(input.openingBalance) + n(input.disbursement)
   const emiAmount = calculateEmi(baseForEmi, n(input.interestRate), n(input.tenureMonths))
 
+  const adjusted = applyClosingBalanceAdjustments(
+    { interestForYear, principalRepaid, closingBalance },
+    input,
+  )
+
   return {
     id: input.id || '',
     lender: String(input.lender || '').trim(),
@@ -298,10 +354,13 @@ export function computeLoanForFinancialYear(input, fyStartYear, fyEndYear) {
     prepaymentAmount: n(input.prepaymentAmount),
     prepaymentDate: input.prepaymentDate || '',
     emiAmount,
-    interestForYear,
-    principalRepaid,
-    closingBalance,
+    interestForYear: adjusted.interestForYear,
+    principalRepaid: adjusted.principalRepaid,
+    closingBalance: adjusted.closingBalance,
     monthlySchedule: fullSchedule,
+    scheduleClosingBalance: adjusted.scheduleClosingBalance,
+    closingAdjustmentPrincipalApplied: adjusted.principalAdjustment,
+    closingAdjustmentInterestApplied: adjusted.interestAdjustment,
   }
 }
 
@@ -318,6 +377,16 @@ export function loanToRecord(loan) {
     emiStartDate: loan.emiStartDate,
     prepaymentAmount: loan.prepaymentAmount,
     prepaymentDate: loan.prepaymentDate,
+    ...defaultClosingAdjustmentFields(),
+    ...(loan.closingAdjustmentEnabled
+      ? {
+          closingAdjustmentEnabled: true,
+          closingAdjustmentMode: normalizeClosingAdjustmentMode(loan.closingAdjustmentMode),
+          closingAdjustmentPrincipal: n(loan.closingAdjustmentPrincipal),
+          closingAdjustmentInterest: n(loan.closingAdjustmentInterest),
+          closingAdjustmentTargetBalance: n(loan.closingAdjustmentTargetBalance),
+        }
+      : {}),
   }
 }
 
@@ -338,6 +407,7 @@ export function migrateRepaymentSchedule(rows, fyStartYear, fyEndYear) {
           emiStartDate: `${fyStartYear}-04-01`,
           prepaymentAmount: row.repayment,
           prepaymentDate: row.repayment ? `${fyEndYear}-03-01` : '',
+          ...defaultClosingAdjustmentFields(),
         },
         fyStartYear,
         fyEndYear,
