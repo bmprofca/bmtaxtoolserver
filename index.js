@@ -77,8 +77,14 @@ const app = express()
 const PORT = process.env.PORT || 3001
 app.locals.bootstrapError = null
 
+app.set('trust proxy', 1)
 app.use(cors())
 app.use(express.json({ limit: '25mb' }))
+app.use((_req, res, next) => {
+  res.setHeader('Connection', 'keep-alive')
+  res.setHeader('Keep-Alive', 'timeout=120')
+  next()
+})
 
 function asyncHandler(handler) {
   return (req, res, next) => {
@@ -125,13 +131,20 @@ app.get(
   }),
 )
 
-app.use('/api', (req, res, next) => {
+app.use('/api', async (req, res, next) => {
   if (!app.locals.bootstrapError || req.path === '/health') {
     return next()
   }
-  return res.status(503).json({
-    error: `Database is unavailable: ${app.locals.bootstrapError}`,
-  })
+
+  try {
+    await bootstrapDataStores()
+    app.locals.bootstrapError = null
+    return next()
+  } catch (err) {
+    return res.status(503).json({
+      error: `Database is unavailable: ${err.message || app.locals.bootstrapError}`,
+    })
+  }
 })
 
 app.post(
@@ -1274,7 +1287,7 @@ async function startServer() {
     app.locals.bootstrapError = err.message || 'Unknown bootstrap error'
     console.error('Server started in degraded mode:', app.locals.bootstrapError)
   }
-  app.listen(PORT, () => {
+  app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://localhost:${PORT}`)
     console.log(`Database: ${process.env.DB_NAME || 'not configured'}`)
     if (app.locals.bootstrapError) {

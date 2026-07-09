@@ -13,12 +13,13 @@ const pool = mysql.createPool({
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
   waitForConnections: true,
-  connectionLimit: 10,
+  connectionLimit: 20,
+  queueLimit: 0,
   enableKeepAlive: true,
   keepAliveInitialDelay: 10_000,
-  connectTimeout: 15_000,
-  maxIdle: 60_000,
-  idleTimeout: 60_000,
+  connectTimeout: 20_000,
+  maxIdle: 120_000,
+  idleTimeout: 120_000,
 })
 
 const TRANSIENT_DB_ERROR_CODES = new Set([
@@ -75,7 +76,7 @@ export function getPool() {
 }
 
 export async function query(sql, params = [], attempt = 1) {
-  const maxAttempts = 3
+  const maxAttempts = 4
   try {
     const [rows] = await pool.query(sql, params)
     return rows
