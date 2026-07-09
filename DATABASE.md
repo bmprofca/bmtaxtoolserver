@@ -9,8 +9,8 @@ When the Node server runs on the same Hostinger account as the database:
 ```env
 DB_HOST=localhost
 DB_PORT=3306
-DB_NAME=u438764371_tools
-DB_USER=u438764371_bmtax
+DB_NAME=u278432002_tool
+DB_USER=u278432002_tool
 DB_PASSWORD=your_password
 PORT=3001
 ```

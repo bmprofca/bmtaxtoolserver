@@ -1,4 +1,4 @@
-const MONTHS = ['Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar']
+const CALENDAR_MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
 function n(value) {
   return Number.isFinite(Number(value)) ? Number(value) : 0
@@ -36,13 +36,22 @@ function isAfterYearMonth(left, right) {
   return yearMonthKey(left.year, left.month) > yearMonthKey(right.year, right.month)
 }
 
-function toLoanMonthStartIso(value) {
-  const parsed = parseLoanYearMonth(value)
-  if (!parsed) {
+function normalizeLoanMonthField(value) {
+  const trimmed = String(value || '').trim()
+  if (!trimmed) {
     return ''
   }
 
-  return `${parsed.year}-${String(parsed.month).padStart(2, '0')}-01`
+  const match = trimmed.match(/^(\d{4})-(\d{2})/)
+  if (!match) {
+    return ''
+  }
+
+  return `${match[1]}-${match[2]}-01`
+}
+
+function toLoanMonthStartIso(value) {
+  return normalizeLoanMonthField(value)
 }
 
 function resolveEmiStartDate(input, fyStartYear) {
@@ -75,79 +84,146 @@ export function calculateEmi(principal, annualRate, tenureMonths) {
   return Math.round((p * monthlyRate * factor) / (factor - 1))
 }
 
-function isInFinancialYear(date, fyStartYear, fyEndYear) {
-  const fyStart = new Date(fyStartYear, 3, 1)
-  const fyEnd = new Date(fyEndYear, 2, 31, 23, 59, 59)
-  return date >= fyStart && date <= fyEnd
+function addCalendarMonths(ym, delta) {
+  const index = ym.year * 12 + (ym.month - 1) + delta
+  return {
+    year: Math.floor(index / 12),
+    month: (index % 12) + 1,
+  }
 }
 
-function sameMonth(dateValue, monthDate) {
-  const parsed =
-    typeof dateValue === 'string'
-      ? parseLoanYearMonth(dateValue)
-      : { year: dateValue.getFullYear(), month: dateValue.getMonth() + 1 }
-
+function sameCalendarMonth(dateValue, ym) {
+  const parsed = parseLoanYearMonth(
+    String(dateValue).includes('T') ? dateValue : toLoanMonthStartIso(dateValue),
+  )
   if (!parsed) {
     return false
   }
 
-  return parsed.year === monthDate.getFullYear() && parsed.month === monthDate.getMonth() + 1
+  return parsed.year === ym.year && parsed.month === ym.month
 }
 
-export function computeLoanForFinancialYear(input, fyStartYear, fyEndYear) {
-  const fyStart = new Date(fyStartYear, 3, 1)
-  const resolvedEmiStartDate = resolveEmiStartDate(input, fyStartYear)
-  const emiStartYm = parseLoanYearMonth(resolvedEmiStartDate)
+export function isCalendarMonthInFinancialYear(year, month, fyStartYear, fyEndYear) {
+  if (month >= 4) {
+    return year === fyStartYear
+  }
+
+  return year === fyEndYear
+}
+
+export function isLoanFullyRepaid(loan) {
+  const tenureMonths = Math.floor(n(loan.tenureMonths))
+  if (tenureMonths < 1) {
+    return false
+  }
+
+  const principal = n(loan.openingBalance) + n(loan.disbursement)
+  if (principal <= 0) {
+    return false
+  }
+
+  if (!loan.monthlySchedule?.length) {
+    return false
+  }
+
+  return loan.monthlySchedule[loan.monthlySchedule.length - 1].balance <= 0
+}
+
+function resolveClosingBalanceAtFyEnd(input, fullSchedule, fyStartYear, fyEndYear) {
   const fyEndYm = { year: fyEndYear, month: 3 }
-  const monthlyRate = n(input.interestRate) / 12 / 100
+  const rowsOnOrBefore = fullSchedule.filter((row) => {
+    const ym = { year: row.year, month: row.month }
+    return !isAfterYearMonth(ym, fyEndYm)
+  })
+
+  if (rowsOnOrBefore.length > 0) {
+    return rowsOnOrBefore[rowsOnOrBefore.length - 1].balance
+  }
 
   let balance = n(input.openingBalance)
-  let interestForYear = 0
-  let principalRepaid = 0
-  const monthlySchedule = []
-  let serialNo = 0
+  const disbYm = input.disbursementDate
+    ? parseLoanYearMonth(toLoanMonthStartIso(input.disbursementDate))
+    : null
+  const fyStartYm = { year: fyStartYear, month: 4 }
 
-  if (n(input.disbursement) > 0 && input.disbursementDate) {
-    const disbDate = new Date(input.disbursementDate)
-    if (isInFinancialYear(disbDate, fyStartYear, fyEndYear)) {
+  if (n(input.disbursement) > 0 && disbYm && !isAfterYearMonth(disbYm, fyEndYm)) {
+    if (!isBeforeYearMonth(disbYm, fyStartYm)) {
       balance += n(input.disbursement)
-    } else if (disbDate < fyStart) {
+    } else {
       balance += n(input.disbursement)
     }
   }
 
+  return Math.max(0, balance)
+}
+
+export function computeFullLoanSchedule(input, fyStartYear) {
+  const resolvedEmiStartDate = resolveEmiStartDate(input, fyStartYear)
+  const emiStartYm = parseLoanYearMonth(resolvedEmiStartDate)
+  if (!emiStartYm) {
+    return []
+  }
+
+  const monthlyRate = n(input.interestRate) / 12 / 100
+  let balance = n(input.openingBalance)
+
+  const disbYm = input.disbursementDate
+    ? parseLoanYearMonth(toLoanMonthStartIso(input.disbursementDate))
+    : null
+  const disbAddedUpfront = Boolean(
+    disbYm && n(input.disbursement) > 0 && !isAfterYearMonth(disbYm, emiStartYm),
+  )
+
+  if (disbAddedUpfront) {
+    balance += n(input.disbursement)
+  }
+
   const baseForEmi = balance > 0 ? balance : n(input.openingBalance) + n(input.disbursement)
-  const emiAmount = calculateEmi(baseForEmi, n(input.interestRate), n(input.tenureMonths))
+  const tenureMonths = Math.floor(n(input.tenureMonths))
+  if (tenureMonths < 1 || baseForEmi <= 0) {
+    return []
+  }
 
-  for (let index = 0; index < 12; index += 1) {
-    const monthDate = new Date(fyStartYear, 3 + index, 1)
-    const monthYm = { year: monthDate.getFullYear(), month: monthDate.getMonth() + 1 }
+  const emiAmount = calculateEmi(baseForEmi, n(input.interestRate), tenureMonths)
+  const maxInstallments = tenureMonths
 
-    if (isBeforeYearMonth(monthYm, emiStartYm) || isAfterYearMonth(monthYm, fyEndYm)) {
-      continue
+  const schedule = []
+  let serialNo = 0
+  let installments = 0
+  let prepaymentApplied = false
+  let currentYm = emiStartYm
+  let disbApplied = disbAddedUpfront
+
+  while (balance > 0 && installments < maxInstallments) {
+    if (!disbApplied && disbYm && n(input.disbursement) > 0) {
+      if (currentYm.year === disbYm.year && currentYm.month === disbYm.month) {
+        balance += n(input.disbursement)
+        disbApplied = true
+      }
     }
 
     if (balance <= 0) {
       break
     }
 
-    if (n(input.prepaymentAmount) > 0 && input.prepaymentDate) {
-      if (sameMonth(input.prepaymentDate, monthDate)) {
+    if (!prepaymentApplied && n(input.prepaymentAmount) > 0 && input.prepaymentDate) {
+      if (sameCalendarMonth(input.prepaymentDate, currentYm)) {
         const prepay = Math.min(balance, n(input.prepaymentAmount))
         balance -= prepay
-        principalRepaid += prepay
         serialNo += 1
-        monthlySchedule.push({
+        schedule.push({
           serialNo,
-          month: index + 1,
-          monthLabel: MONTHS[index],
-          year: monthDate.getFullYear(),
+          month: currentYm.month,
+          monthLabel: CALENDAR_MONTH_LABELS[currentYm.month - 1],
+          year: currentYm.year,
           emi: prepay,
           principal: prepay,
           interest: 0,
-          balance,
+          balance: Math.max(0, balance),
           isPrepayment: true,
+          isPreClosure: true,
         })
+        prepaymentApplied = true
         if (balance <= 0) {
           break
         }
@@ -159,21 +235,55 @@ export function computeLoanForFinancialYear(input, fyStartYear, fyEndYear) {
     const emi = interest + principal
 
     balance -= principal
-    interestForYear += interest
-    principalRepaid += principal
-
     serialNo += 1
-    monthlySchedule.push({
+    schedule.push({
       serialNo,
-      month: index + 1,
-      monthLabel: MONTHS[index],
-      year: monthDate.getFullYear(),
+      month: currentYm.month,
+      monthLabel: CALENDAR_MONTH_LABELS[currentYm.month - 1],
+      year: currentYm.year,
       emi,
       principal,
       interest,
       balance: Math.max(0, balance),
     })
+
+    installments += 1
+    currentYm = addCalendarMonths(currentYm, 1)
   }
+
+  return schedule
+}
+
+export function computeLoanForFinancialYear(input, fyStartYear, fyEndYear) {
+  const resolvedEmiStartDate = resolveEmiStartDate(input, fyStartYear)
+  const fullSchedule = computeFullLoanSchedule(input, fyStartYear)
+
+  let interestForYear = 0
+  let principalRepaid = 0
+  for (const row of fullSchedule) {
+    if (isCalendarMonthInFinancialYear(row.year, row.month, fyStartYear, fyEndYear)) {
+      interestForYear += row.interest
+      principalRepaid += row.principal
+    }
+  }
+
+  const closingBalance = resolveClosingBalanceAtFyEnd(input, fullSchedule, fyStartYear, fyEndYear)
+
+  let balance = n(input.openingBalance)
+  const disbYm = input.disbursementDate
+    ? parseLoanYearMonth(toLoanMonthStartIso(input.disbursementDate))
+    : null
+  const emiStartYm = parseLoanYearMonth(resolvedEmiStartDate)
+  const disbAddedUpfront = Boolean(
+    disbYm && emiStartYm && n(input.disbursement) > 0 && !isAfterYearMonth(disbYm, emiStartYm),
+  )
+
+  if (disbAddedUpfront) {
+    balance += n(input.disbursement)
+  }
+
+  const baseForEmi = balance > 0 ? balance : n(input.openingBalance) + n(input.disbursement)
+  const emiAmount = calculateEmi(baseForEmi, n(input.interestRate), n(input.tenureMonths))
 
   return {
     id: input.id || '',
@@ -190,8 +300,8 @@ export function computeLoanForFinancialYear(input, fyStartYear, fyEndYear) {
     emiAmount,
     interestForYear,
     principalRepaid,
-    closingBalance: Math.max(0, balance),
-    monthlySchedule,
+    closingBalance,
+    monthlySchedule: fullSchedule,
   }
 }
 

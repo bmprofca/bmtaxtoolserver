@@ -527,6 +527,7 @@ export async function initDatabase() {
       emi_start_date DATE NULL,
       prepayment_amount DECIMAL(18, 2) NOT NULL DEFAULT 0,
       prepayment_date DATE NULL,
+      is_closed TINYINT(1) NOT NULL DEFAULT 0,
       sort_order INT NOT NULL DEFAULT 0,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       created_by_user_id VARCHAR(50) NULL,
@@ -1280,6 +1281,14 @@ async function migrateLoanTables() {
         columnNames.add(name)
       }
     }
+  }
+
+  let loanRecordColumns = await query('SHOW COLUMNS FROM loan_records')
+  let loanRecordColumnNames = new Set(loanRecordColumns.map((col) => col.Field))
+  if (!loanRecordColumnNames.has('is_closed')) {
+    await query(
+      'ALTER TABLE loan_records ADD COLUMN is_closed TINYINT(1) NOT NULL DEFAULT 0 AFTER prepayment_date',
+    )
   }
 
   await ensureFyScopedCompositePrimaryKey('loan_records')

@@ -1,4 +1,4 @@
--- Run this in Hostinger phpMyAdmin (database: u438764371_tools)
+-- Run this in Hostinger phpMyAdmin (database: u278432002_tool)
 
 CREATE TABLE IF NOT EXISTS users (
   id VARCHAR(50) PRIMARY KEY,
@@ -424,6 +424,7 @@ CREATE TABLE IF NOT EXISTS loan_records (
   emi_start_date DATE NULL,
   prepayment_amount DECIMAL(18, 2) NOT NULL DEFAULT 0,
   prepayment_date DATE NULL,
+  is_closed TINYINT(1) NOT NULL DEFAULT 0,
   sort_order INT NOT NULL DEFAULT 0,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   created_by_user_id VARCHAR(50) NULL,

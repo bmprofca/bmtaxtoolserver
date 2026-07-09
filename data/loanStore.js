@@ -3,6 +3,7 @@ import { parseJson } from '../db/init.js'
 import { ensureUniqueRecordIds, generateId } from '../utils/recordIds.js'
 import {
   computeLoanForFinancialYear,
+  isLoanFullyRepaid,
   mergeCashFlowByYear,
   migrateRepaymentSchedule,
   summarizeLoans,
@@ -10,7 +11,7 @@ import {
 
 const LOAN_COLUMNS = `id, client_id, fy_id, business_id, lender, loan_type,
   opening_balance, disbursement, disbursement_date, interest_rate, tenure_months,
-  emi_start_date, prepayment_amount, prepayment_date, sort_order, created_at, updated_at`
+  emi_start_date, prepayment_amount, prepayment_date, is_closed, sort_order, created_at, updated_at`
 
 const LOAN_TYPES = new Set(['long-term', 'short-term'])
 
@@ -30,21 +31,33 @@ function buildActor(user) {
   }
 }
 
+function normalizeLoanMonthField(value) {
+  const trimmed = String(value || '').trim()
+  if (!trimmed) {
+    return ''
+  }
+
+  const match = trimmed.match(/^(\d{4})-(\d{2})/)
+  if (!match) {
+    return ''
+  }
+
+  return `${match[1]}-${match[2]}-01`
+}
+
 function toDateString(value) {
   if (!value) {
     return ''
   }
 
   if (value instanceof Date) {
-    return value.toISOString().slice(0, 10)
+    const year = value.getFullYear()
+    const month = String(value.getMonth() + 1).padStart(2, '0')
+    const day = String(value.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
   }
 
-  const trimmed = String(value).trim()
-  if (!trimmed) {
-    return ''
-  }
-
-  return trimmed.slice(0, 10)
+  return normalizeLoanMonthField(value) || String(value).trim().slice(0, 10)
 }
 
 function normalizeLoanType(value) {
@@ -126,7 +139,7 @@ async function getFyMeta(fyId) {
   }
 }
 
-async function insertLoanRow(clientId, fyId, businessId, loan, sortOrder, actor) {
+async function insertLoanRow(clientId, fyId, businessId, loan, sortOrder, isClosed, actor) {
   const normalized = normalizeLoanRecord(loan)
   const { userId, username, name } = buildActor(actor)
 
@@ -134,9 +147,9 @@ async function insertLoanRow(clientId, fyId, businessId, loan, sortOrder, actor)
     `INSERT INTO loan_records (
        id, client_id, fy_id, business_id, lender, loan_type,
        opening_balance, disbursement, disbursement_date, interest_rate, tenure_months,
-       emi_start_date, prepayment_amount, prepayment_date, sort_order,
+       emi_start_date, prepayment_amount, prepayment_date, is_closed, sort_order,
        created_by_user_id, created_by_username, created_by_name
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       normalized.id,
       clientId,
@@ -152,6 +165,7 @@ async function insertLoanRow(clientId, fyId, businessId, loan, sortOrder, actor)
       toDateString(normalized.emiStartDate) || null,
       normalized.prepaymentAmount,
       toDateString(normalized.prepaymentDate) || null,
+      isClosed ? 1 : 0,
       sortOrder,
       userId,
       username,
@@ -160,7 +174,7 @@ async function insertLoanRow(clientId, fyId, businessId, loan, sortOrder, actor)
   )
 }
 
-async function updateLoanRow(clientId, fyId, businessId, loan, sortOrder, actor) {
+async function updateLoanRow(clientId, fyId, businessId, loan, sortOrder, isClosed, actor) {
   const normalized = normalizeLoanRecord(loan)
   const { userId, username, name } = buildActor(actor)
 
@@ -176,6 +190,7 @@ async function updateLoanRow(clientId, fyId, businessId, loan, sortOrder, actor)
          emi_start_date = ?,
          prepayment_amount = ?,
          prepayment_date = ?,
+         is_closed = ?,
          sort_order = ?,
          updated_by_user_id = ?,
          updated_by_username = ?,
@@ -193,6 +208,7 @@ async function updateLoanRow(clientId, fyId, businessId, loan, sortOrder, actor)
       toDateString(normalized.emiStartDate) || null,
       normalized.prepaymentAmount,
       toDateString(normalized.prepaymentDate) || null,
+      isClosed ? 1 : 0,
       sortOrder,
       userId,
       username,
@@ -518,17 +534,24 @@ export async function saveLoansForFs(clientId, fyId, businessId, loans, actor) {
     }
   }
 
+  const fyMeta = await getFyMeta(fyId)
+
   for (let index = 0; index < normalizedLoans.length; index += 1) {
     const loan = normalizedLoans[index]
+    const computed =
+      fyMeta.startYear && fyMeta.endYear
+        ? computeLoanForFinancialYear(loan, fyMeta.startYear, fyMeta.endYear)
+        : null
+    const isClosed = computed ? isLoanFullyRepaid(computed) : false
+
     if (existingIds.has(loan.id)) {
-      await updateLoanRow(clientId, fyId, businessId, loan, index, actor)
+      await updateLoanRow(clientId, fyId, businessId, loan, index, isClosed, actor)
     } else {
-      await insertLoanRow(clientId, fyId, businessId, loan, index, actor)
+      await insertLoanRow(clientId, fyId, businessId, loan, index, isClosed, actor)
       existingIds.add(loan.id)
     }
   }
 
-  const fyMeta = await getFyMeta(fyId)
   if (fyMeta.startYear && fyMeta.endYear) {
     await syncLoanHistory(clientId, businessId, fyId, fyMeta, normalizedLoans, actor)
   } else if (!normalizedLoans.length) {

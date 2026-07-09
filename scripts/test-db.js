@@ -75,7 +75,7 @@ async function main() {
       console.error('')
       console.error('Fix: Remote MySQL is likely blocked.')
       console.error('  1. Hostinger hPanel → Databases → Remote MySQL')
-      console.error('  2. Add your IP or enable "Any Host" for database u438764371_tools')
+      console.error('  2. Add your IP or enable "Any Host" for database u278432002_tool')
       const ip = await getPublicIp()
       if (ip) {
         console.error(`  3. Your current public IP: ${ip}`)
@@ -101,7 +101,7 @@ async function main() {
 
     if (err.code === 'ER_BAD_DB_ERROR') {
       console.error('')
-      console.error('Fix: Database name is wrong. Expected: u438764371_tools')
+      console.error('Fix: Database name is wrong. Expected: u278432002_tool')
     }
 
     process.exit(1)

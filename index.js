@@ -75,6 +75,7 @@ import { testConnection } from './db/connection.js'
 
 const app = express()
 const PORT = process.env.PORT || 3001
+app.locals.bootstrapError = null
 
 app.use(cors())
 app.use(express.json({ limit: '25mb' }))
@@ -117,10 +118,21 @@ app.get(
     const dbConnected = await testConnection()
     res.json({
       message: 'Server is running',
+      bootstrapped: !app.locals.bootstrapError,
+      bootstrapError: app.locals.bootstrapError,
       database: dbConnected ? 'connected' : 'disconnected',
     })
   }),
 )
+
+app.use('/api', (req, res, next) => {
+  if (!app.locals.bootstrapError || req.path === '/health') {
+    return next()
+  }
+  return res.status(503).json({
+    error: `Database is unavailable: ${app.locals.bootstrapError}`,
+  })
+})
 
 app.post(
   '/api/auth/login',
@@ -1258,14 +1270,17 @@ app.use((err, _req, res, _next) => {
 async function startServer() {
   try {
     await bootstrapDataStores()
-    app.listen(PORT, () => {
-      console.log(`Server running on http://localhost:${PORT}`)
-      console.log(`Database: ${process.env.DB_NAME || 'not configured'}`)
-    })
   } catch (err) {
-    console.error('Failed to start server:', err.message)
-    process.exit(1)
+    app.locals.bootstrapError = err.message || 'Unknown bootstrap error'
+    console.error('Server started in degraded mode:', app.locals.bootstrapError)
   }
+  app.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`)
+    console.log(`Database: ${process.env.DB_NAME || 'not configured'}`)
+    if (app.locals.bootstrapError) {
+      console.log('API will return 503 responses until database connectivity is restored.')
+    }
+  })
 }
 
 startServer()
