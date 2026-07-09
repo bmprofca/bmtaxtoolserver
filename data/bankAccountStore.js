@@ -3,7 +3,7 @@ import { parseJson } from '../db/init.js'
 import { ensureUniqueRecordIds, generateId } from '../utils/recordIds.js'
 
 const BANK_ACCOUNT_COLUMNS = `id, client_id, fy_id, business_id, bank_name, account_number, account_type,
-  opening_balance, debit, credit, bank_charge, interest, closing_balance, sort_order,
+  status, closed_in_fy_id, opening_balance, debit, credit, bank_charge, interest, closing_balance, sort_order,
   created_at, updated_at`
 
 const BANK_ACCOUNT_TYPES = new Set(['savings', 'current', 'od', 'cc', 'fd', 'others'])
@@ -39,16 +39,28 @@ export function normalizeBankAccountTypeId(typeId) {
   return BANK_ACCOUNT_TYPES.has(normalized) ? normalized : 'current'
 }
 
+const BANK_ACCOUNT_STATUSES = new Set(['active', 'closed'])
+
+function normalizeBankAccountStatus(status) {
+  const normalized = String(status || '').trim()
+  return BANK_ACCOUNT_STATUSES.has(normalized) ? normalized : 'active'
+}
+
 export function normalizeBankAccount(raw = {}) {
   const hasStoredClosing =
     (raw.closingBalance !== undefined && raw.closingBalance !== null) ||
     (raw.closing_balance !== undefined && raw.closing_balance !== null)
+
+  const status = normalizeBankAccountStatus(raw.status)
+  const closedInFyId = String(raw.closedInFyId ?? raw.closed_in_fy_id ?? '').trim()
 
   return {
     id: String(raw.id || generateId()).trim(),
     bankName: String(raw.bankName ?? raw.bank_name ?? '').trim(),
     accountNumber: String(raw.accountNumber ?? raw.account_number ?? '').trim(),
     accountType: normalizeBankAccountTypeId(raw.accountType ?? raw.account_type),
+    status,
+    closedInFyId: status === 'closed' && closedInFyId ? closedInFyId : undefined,
     openingBalance: n(raw.openingBalance ?? raw.opening_balance),
     debit: n(raw.debit),
     credit: n(raw.credit),
@@ -84,6 +96,8 @@ function serializeBankAccountRow(row) {
     bankName: row.bank_name,
     accountNumber: row.account_number,
     accountType: row.account_type,
+    status: row.status,
+    closedInFyId: row.closed_in_fy_id,
     openingBalance: row.opening_balance,
     debit: row.debit,
     credit: row.credit,
@@ -110,9 +124,9 @@ async function insertBankAccountRow(clientId, fyId, businessId, account, sortOrd
   await query(
     `INSERT INTO bank_account_rows (
        id, client_id, fy_id, business_id, bank_name, account_number, account_type,
-       opening_balance, debit, credit, bank_charge, interest, closing_balance, sort_order,
+       status, closed_in_fy_id, opening_balance, debit, credit, bank_charge, interest, closing_balance, sort_order,
        created_by_user_id, created_by_username, created_by_name
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       normalized.id,
       clientId,
@@ -121,6 +135,8 @@ async function insertBankAccountRow(clientId, fyId, businessId, account, sortOrd
       normalized.bankName,
       normalized.accountNumber,
       normalized.accountType,
+      normalized.status,
+      normalized.closedInFyId || null,
       normalized.openingBalance,
       normalized.debit,
       normalized.credit,
@@ -144,6 +160,8 @@ async function updateBankAccountRow(clientId, fyId, businessId, account, sortOrd
      SET bank_name = ?,
          account_number = ?,
          account_type = ?,
+         status = ?,
+         closed_in_fy_id = ?,
          opening_balance = ?,
          debit = ?,
          credit = ?,
@@ -160,6 +178,8 @@ async function updateBankAccountRow(clientId, fyId, businessId, account, sortOrd
       normalized.bankName,
       normalized.accountNumber,
       normalized.accountType,
+      normalized.status,
+      normalized.closedInFyId || null,
       normalized.openingBalance,
       normalized.debit,
       normalized.credit,
@@ -208,15 +228,18 @@ async function upsertBankAccountHistory(clientId, businessId, fyId, fyMeta, acco
     `INSERT INTO bank_account_history (
        id, client_id, business_id, fy_id, fy_label, fy_start_year,
        bank_account_id, bank_name, account_number, account_type,
+       status, closed_in_fy_id,
        opening_balance, debit, credit, bank_charge, interest, closing_balance,
        created_by_user_id, created_by_username, created_by_name
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE
        fy_label = VALUES(fy_label),
        fy_start_year = VALUES(fy_start_year),
        bank_name = VALUES(bank_name),
        account_number = VALUES(account_number),
        account_type = VALUES(account_type),
+       status = VALUES(status),
+       closed_in_fy_id = VALUES(closed_in_fy_id),
        opening_balance = VALUES(opening_balance),
        debit = VALUES(debit),
        credit = VALUES(credit),
@@ -238,6 +261,8 @@ async function upsertBankAccountHistory(clientId, businessId, fyId, fyMeta, acco
       normalized.bankName,
       normalized.accountNumber,
       normalized.accountType,
+      normalized.status,
+      normalized.closedInFyId || null,
       normalized.openingBalance,
       normalized.debit,
       normalized.credit,
@@ -272,6 +297,8 @@ function serializeHistoryRow(row) {
     bankName: row.bank_name || '',
     accountNumber: row.account_number || '',
     accountType: normalizeBankAccountTypeId(row.account_type),
+    status: normalizeBankAccountStatus(row.status),
+    closedInFyId: row.closed_in_fy_id || undefined,
     openingBalance: n(row.opening_balance),
     debit: n(row.debit),
     credit: n(row.credit),

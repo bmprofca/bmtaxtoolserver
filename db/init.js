@@ -346,6 +346,8 @@ export async function initDatabase() {
       bank_name VARCHAR(255) NOT NULL DEFAULT '',
       account_number VARCHAR(100) NOT NULL DEFAULT '',
       account_type VARCHAR(20) NOT NULL DEFAULT 'current',
+      status VARCHAR(20) NOT NULL DEFAULT 'active',
+      closed_in_fy_id VARCHAR(50) NULL,
       opening_balance DECIMAL(18, 2) NOT NULL DEFAULT 0,
       debit DECIMAL(18, 2) NOT NULL DEFAULT 0,
       credit DECIMAL(18, 2) NOT NULL DEFAULT 0,
@@ -379,6 +381,8 @@ export async function initDatabase() {
       bank_name VARCHAR(255) NOT NULL DEFAULT '',
       account_number VARCHAR(100) NOT NULL DEFAULT '',
       account_type VARCHAR(20) NOT NULL DEFAULT 'current',
+      status VARCHAR(20) NOT NULL DEFAULT 'active',
+      closed_in_fy_id VARCHAR(50) NULL,
       opening_balance DECIMAL(18, 2) NOT NULL DEFAULT 0,
       debit DECIMAL(18, 2) NOT NULL DEFAULT 0,
       credit DECIMAL(18, 2) NOT NULL DEFAULT 0,
@@ -1321,6 +1325,18 @@ async function migrateBankAccountTables() {
     ]
 
     for (const [name, definition] of auditColumns) {
+      if (!columnNames.has(name)) {
+        await query(`ALTER TABLE ${tableName} ADD COLUMN ${name} ${definition}`)
+        columnNames.add(name)
+      }
+    }
+
+    const lifecycleColumns = [
+      ['status', "VARCHAR(20) NOT NULL DEFAULT 'active' AFTER account_type"],
+      ['closed_in_fy_id', 'VARCHAR(50) NULL AFTER status'],
+    ]
+
+    for (const [name, definition] of lifecycleColumns) {
       if (!columnNames.has(name)) {
         await query(`ALTER TABLE ${tableName} ADD COLUMN ${name} ${definition}`)
         columnNames.add(name)
