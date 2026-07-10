@@ -83,6 +83,7 @@ function createEmptyFsRecord(clientId, fyId, businessId) {
     otherShortTermBorrowingLines: [],
     manualNoteLines: [],
     capitalAccountLines: [],
+    cogsExtraLines: [],
     plAppropriationLines: [],
     plAppropriationAmounts: {},
     depreciationSchedule: [
@@ -218,6 +219,7 @@ export async function saveFsData(clientId, fyId, businessId, data, actor) {
           otherShortTermBorrowingLines: data.otherShortTermBorrowingLines,
           manualNoteLines: data.manualNoteLines,
           capitalAccountLines: data.capitalAccountLines,
+          cogsExtraLines: data.cogsExtraLines,
           plAppropriationLines: data.plAppropriationLines,
           plAppropriationAmounts: data.plAppropriationAmounts,
           cashAdjustment: data.cashAdjustment,
@@ -240,6 +242,7 @@ export async function saveFsData(clientId, fyId, businessId, data, actor) {
     otherShortTermBorrowingLines: [],
     manualNoteLines: [],
     capitalAccountLines: [],
+    cogsExtraLines: [],
     plAppropriationLines: [],
     plAppropriationAmounts: {},
     depreciationSchedule: depreciation.depreciationSchedule,

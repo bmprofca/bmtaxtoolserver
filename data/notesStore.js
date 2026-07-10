@@ -69,6 +69,12 @@ function serializeLineRow(row) {
         sign: normalizeSign(row.line_sign),
         typeId: row.reference_id || 'capital-introduced',
       }
+    case 'cogs_extra':
+      return {
+        ...base,
+        sign: normalizeSign(row.line_sign),
+        typeId: row.reference_id || 'direct-expenses',
+      }
     case 'pl_appropriation':
       return { ...base, categoryId: row.reference_id || 'general-reserve' }
     default:
@@ -178,6 +184,7 @@ function buildLineCollections(lineRows) {
   const otherShortTermBorrowingLines = []
   const manualNoteLines = []
   const capitalAccountLines = []
+  const cogsExtraLines = []
   const plAppropriationLines = []
 
   for (const row of lineRows) {
@@ -196,6 +203,9 @@ function buildLineCollections(lineRows) {
       case 'capital_account':
         capitalAccountLines.push(line)
         break
+      case 'cogs_extra':
+        cogsExtraLines.push(line)
+        break
       case 'pl_appropriation':
         plAppropriationLines.push(line)
         break
@@ -209,6 +219,7 @@ function buildLineCollections(lineRows) {
     otherShortTermBorrowingLines,
     manualNoteLines,
     capitalAccountLines,
+    cogsExtraLines,
     plAppropriationLines,
   }
 }
@@ -319,6 +330,10 @@ async function upsertLineRow(clientId, fyId, businessId, line, kind, sortOrder, 
       break
     case 'capital_account':
       referenceId = String(line.typeId || 'capital-introduced')
+      lineSign = normalizeSign(line.sign)
+      break
+    case 'cogs_extra':
+      referenceId = String(line.typeId || 'direct-expenses')
       lineSign = normalizeSign(line.sign)
       break
     case 'pl_appropriation':
@@ -515,6 +530,7 @@ export async function saveNotesForFs(clientId, fyId, businessId, data, actor) {
     ['short_term_borrowing', data.otherShortTermBorrowingLines || []],
     ['manual_note', data.manualNoteLines || []],
     ['capital_account', data.capitalAccountLines || []],
+    ['cogs_extra', data.cogsExtraLines || []],
     ['pl_appropriation', data.plAppropriationLines || []],
   ]
 
@@ -675,6 +691,7 @@ export async function migrateNotesFromFsData() {
       payload.otherShortTermBorrowingLines?.length ||
       payload.manualNoteLines?.length ||
       payload.capitalAccountLines?.length ||
+      payload.cogsExtraLines?.length ||
       payload.plAppropriationLines?.length ||
       payload.cashAdjustment
 
@@ -693,6 +710,7 @@ export async function migrateNotesFromFsData() {
         otherShortTermBorrowingLines: payload.otherShortTermBorrowingLines || [],
         manualNoteLines: payload.manualNoteLines || [],
         capitalAccountLines: payload.capitalAccountLines || [],
+        cogsExtraLines: payload.cogsExtraLines || [],
         plAppropriationLines: payload.plAppropriationLines || [],
         plAppropriationAmounts: payload.plAppropriationAmounts || {},
         cashAdjustment: payload.cashAdjustment || createEmptyCashAdjustment(),

@@ -30,6 +30,7 @@ export const NOTE_LINE_KINDS = new Set([
   'short_term_borrowing',
   'manual_note',
   'capital_account',
+  'cogs_extra',
   'pl_appropriation',
 ])
 
