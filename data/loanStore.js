@@ -313,6 +313,30 @@ async function fetchScheduleRows(clientId, businessId, fyId, loanId) {
   )
 }
 
+async function fetchAllScheduleRows(clientId, businessId) {
+  return query(
+    `SELECT fy_id, loan_id, serial_no, month, month_label, year, emi, principal, interest, balance, is_prepayment
+     FROM loan_schedule_rows
+     WHERE client_id = ? AND business_id = ?
+     ORDER BY fy_id ASC, loan_id ASC, sort_order ASC, serial_no ASC`,
+    [clientId, businessId],
+  )
+}
+
+function groupScheduleRowsByFyLoan(rows) {
+  const grouped = new Map()
+  for (const row of rows) {
+    const key = `${row.fy_id}:${row.loan_id}`
+    const bucket = grouped.get(key)
+    if (bucket) {
+      bucket.push(row)
+    } else {
+      grouped.set(key, [row])
+    }
+  }
+  return grouped
+}
+
 function serializeScheduleRow(row) {
   return {
     serialNo: Number(row.serial_no) || 0,
@@ -585,7 +609,7 @@ export async function getLoansForFs(clientId, fyId, businessId) {
     return []
   }
 
-  return saveLoansForFs(clientId, fyId, businessId, legacyLoans, null)
+  return legacyLoans
 }
 
 export async function saveLoansForFs(clientId, fyId, businessId, loans, actor) {
@@ -671,16 +695,17 @@ export async function getLoanHistory(clientId, businessId, loanId = null) {
   sql += ' ORDER BY fy_start_year DESC, lender ASC'
 
   const rows = await query(sql, params)
+  const scheduleRows = await fetchAllScheduleRows(clientId, businessId)
+  const schedulesByFyLoan = groupScheduleRowsByFyLoan(scheduleRows)
   const history = []
 
   for (const row of rows) {
-    const monthlySchedule = await loadMonthlySchedule(
-      clientId,
-      businessId,
-      row.fy_id,
-      row.loan_id,
-      row.monthly_schedule,
-    )
+    const scheduleKey = `${row.fy_id}:${row.loan_id}`
+    const scheduleBucket = schedulesByFyLoan.get(scheduleKey) ?? []
+    const monthlySchedule =
+      scheduleBucket.length > 0
+        ? scheduleBucket.map(serializeScheduleRow)
+        : parseJson(row.monthly_schedule) || []
     history.push(serializeHistoryRow(row, monthlySchedule))
   }
 
