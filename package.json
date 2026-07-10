@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "node --watch index.js",
     "start": "node index.js",
-    "db:test": "node scripts/test-db.js"
+    "db:test": "node scripts/test-db.js",
+    "db:ensure-gst": "node scripts/ensure-gst-reco-schema.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

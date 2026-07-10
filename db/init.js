@@ -408,104 +408,7 @@ export async function initDatabase() {
   const { migrateBankAccountsFromFsData } = await import('../data/bankAccountStore.js')
   await migrateBankAccountsFromFsData()
 
-  await query(`
-    CREATE TABLE IF NOT EXISTS gst_reco_records (
-      id VARCHAR(50) PRIMARY KEY,
-      client_id VARCHAR(50) NOT NULL,
-      fy_id VARCHAR(50) NOT NULL,
-      business_id VARCHAR(50) NOT NULL,
-      link_sales_to_revenue_note TINYINT(1) NOT NULL DEFAULT 0,
-      link_closing_to_notes TINYINT(1) NOT NULL DEFAULT 0,
-      closing_from_notes_igst DECIMAL(18, 2) NOT NULL DEFAULT 0,
-      closing_from_notes_cgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
-      closing_from_notes_sgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
-      sales_amount DECIMAL(18, 2) NOT NULL DEFAULT 0,
-      sales_igst DECIMAL(18, 2) NOT NULL DEFAULT 0,
-      sales_cgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
-      sales_sgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
-      amended_sales DECIMAL(18, 2) NOT NULL DEFAULT 0,
-      amended_igst DECIMAL(18, 2) NOT NULL DEFAULT 0,
-      amended_cgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
-      amended_sgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
-      ot_igst_to_igst DECIMAL(18, 2) NOT NULL DEFAULT 0,
-      ot_igst_to_cgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
-      ot_igst_to_sgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
-      ot_cgst_to_igst DECIMAL(18, 2) NOT NULL DEFAULT 0,
-      ot_cgst_to_cgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
-      ot_sgst_to_igst DECIMAL(18, 2) NOT NULL DEFAULT 0,
-      ot_sgst_to_sgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
-      ot_cash_igst DECIMAL(18, 2) NOT NULL DEFAULT 0,
-      ot_cash_cgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
-      ot_cash_sgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
-      sr_3b_igst DECIMAL(18, 2) NOT NULL DEFAULT 0,
-      sr_3b_cgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
-      sr_3b_sgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
-      sr_prev_igst DECIMAL(18, 2) NOT NULL DEFAULT 0,
-      sr_prev_cgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
-      sr_prev_sgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
-      sr_2b_igst DECIMAL(18, 2) NOT NULL DEFAULT 0,
-      sr_2b_cgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
-      sr_2b_sgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      created_by_user_id VARCHAR(50) NULL,
-      created_by_username VARCHAR(100) NULL,
-      created_by_name VARCHAR(255) NULL,
-      updated_by_user_id VARCHAR(50) NULL,
-      updated_by_username VARCHAR(100) NULL,
-      updated_by_name VARCHAR(255) NULL,
-      updated_at TIMESTAMP NULL,
-      UNIQUE KEY uniq_gst_reco_fs (client_id, fy_id, business_id),
-      INDEX idx_gst_reco_client_fy (client_id, fy_id)
-    )
-  `)
-
-  await query(`
-    CREATE TABLE IF NOT EXISTS gst_reco_input_tax_rows (
-      id VARCHAR(50) PRIMARY KEY,
-      client_id VARCHAR(50) NOT NULL,
-      fy_id VARCHAR(50) NOT NULL,
-      business_id VARCHAR(50) NOT NULL,
-      row_type VARCHAR(50) NOT NULL,
-      particular VARCHAR(500) NOT NULL DEFAULT '',
-      igst DECIMAL(18, 2) NOT NULL DEFAULT 0,
-      cgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
-      sgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
-      sort_order INT NOT NULL DEFAULT 0,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      created_by_user_id VARCHAR(50) NULL,
-      created_by_username VARCHAR(100) NULL,
-      created_by_name VARCHAR(255) NULL,
-      updated_by_user_id VARCHAR(50) NULL,
-      updated_by_username VARCHAR(100) NULL,
-      updated_by_name VARCHAR(255) NULL,
-      updated_at TIMESTAMP NULL,
-      UNIQUE KEY uniq_gst_reco_input_row (client_id, fy_id, business_id, row_type),
-      INDEX idx_gst_reco_input_fs (client_id, fy_id, business_id)
-    )
-  `)
-
-  await query(`
-    CREATE TABLE IF NOT EXISTS gst_reco_history (
-      id VARCHAR(50) PRIMARY KEY,
-      client_id VARCHAR(50) NOT NULL,
-      business_id VARCHAR(50) NOT NULL,
-      fy_id VARCHAR(50) NOT NULL,
-      fy_label VARCHAR(20) NOT NULL DEFAULT '',
-      fy_start_year INT NOT NULL DEFAULT 0,
-      payload JSON NOT NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      created_by_user_id VARCHAR(50) NULL,
-      created_by_username VARCHAR(100) NULL,
-      created_by_name VARCHAR(255) NULL,
-      updated_by_user_id VARCHAR(50) NULL,
-      updated_by_username VARCHAR(100) NULL,
-      updated_by_name VARCHAR(255) NULL,
-      updated_at TIMESTAMP NULL,
-      UNIQUE KEY uniq_gst_reco_history (client_id, business_id, fy_id),
-      INDEX idx_gst_reco_history_year (client_id, business_id, fy_start_year)
-    )
-  `)
-
+  await createGstRecoTables()
   await migrateGstRecoTables()
 
   const { migrateGstRecoFromFsData } = await import('../data/gstRecoStore.js')
@@ -1359,9 +1262,127 @@ async function migrateLoanTables() {
   await ensureFyScopedCompositePrimaryKey('loan_records')
 }
 
+async function createGstRecoTables() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS gst_reco_records (
+      id VARCHAR(50) PRIMARY KEY,
+      client_id VARCHAR(50) NOT NULL,
+      fy_id VARCHAR(50) NOT NULL,
+      business_id VARCHAR(50) NOT NULL,
+      link_sales_to_revenue_note TINYINT(1) NOT NULL DEFAULT 0,
+      link_closing_to_notes TINYINT(1) NOT NULL DEFAULT 0,
+      closing_from_notes_igst DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      closing_from_notes_cgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      closing_from_notes_sgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      sales_amount DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      sales_igst DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      sales_cgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      sales_sgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      amended_sales DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      amended_igst DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      amended_cgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      amended_sgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      ot_igst_to_igst DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      ot_igst_to_cgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      ot_igst_to_sgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      ot_cgst_to_igst DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      ot_cgst_to_cgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      ot_sgst_to_igst DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      ot_sgst_to_sgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      ot_cash_igst DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      ot_cash_cgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      ot_cash_sgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      sr_3b_igst DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      sr_3b_cgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      sr_3b_sgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      sr_prev_igst DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      sr_prev_cgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      sr_prev_sgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      sr_2b_igst DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      sr_2b_cgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      sr_2b_sgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      created_by_user_id VARCHAR(50) NULL,
+      created_by_username VARCHAR(100) NULL,
+      created_by_name VARCHAR(255) NULL,
+      updated_by_user_id VARCHAR(50) NULL,
+      updated_by_username VARCHAR(100) NULL,
+      updated_by_name VARCHAR(255) NULL,
+      updated_at TIMESTAMP NULL,
+      UNIQUE KEY uniq_gst_reco_fs (client_id, fy_id, business_id),
+      INDEX idx_gst_reco_client_fy (client_id, fy_id)
+    )
+  `)
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS gst_reco_input_tax_rows (
+      id VARCHAR(50) PRIMARY KEY,
+      client_id VARCHAR(50) NOT NULL,
+      fy_id VARCHAR(50) NOT NULL,
+      business_id VARCHAR(50) NOT NULL,
+      row_type VARCHAR(50) NOT NULL,
+      particular VARCHAR(500) NOT NULL DEFAULT '',
+      igst DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      cgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      sgst DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      sort_order INT NOT NULL DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      created_by_user_id VARCHAR(50) NULL,
+      created_by_username VARCHAR(100) NULL,
+      created_by_name VARCHAR(255) NULL,
+      updated_by_user_id VARCHAR(50) NULL,
+      updated_by_username VARCHAR(100) NULL,
+      updated_by_name VARCHAR(255) NULL,
+      updated_at TIMESTAMP NULL,
+      UNIQUE KEY uniq_gst_reco_input_row (client_id, fy_id, business_id, row_type),
+      INDEX idx_gst_reco_input_fs (client_id, fy_id, business_id)
+    )
+  `)
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS gst_reco_history (
+      id VARCHAR(50) PRIMARY KEY,
+      client_id VARCHAR(50) NOT NULL,
+      business_id VARCHAR(50) NOT NULL,
+      fy_id VARCHAR(50) NOT NULL,
+      fy_label VARCHAR(20) NOT NULL DEFAULT '',
+      fy_start_year INT NOT NULL DEFAULT 0,
+      payload JSON NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      created_by_user_id VARCHAR(50) NULL,
+      created_by_username VARCHAR(100) NULL,
+      created_by_name VARCHAR(255) NULL,
+      updated_by_user_id VARCHAR(50) NULL,
+      updated_by_username VARCHAR(100) NULL,
+      updated_by_name VARCHAR(255) NULL,
+      updated_at TIMESTAMP NULL,
+      UNIQUE KEY uniq_gst_reco_history (client_id, business_id, fy_id),
+      INDEX idx_gst_reco_history_year (client_id, business_id, fy_start_year)
+    )
+  `)
+}
+
+export async function ensureGstRecoSchema() {
+  await createGstRecoTables()
+  await migrateGstRecoTables()
+  const { migrateGstRecoFromFsData } = await import('../data/gstRecoStore.js')
+  await migrateGstRecoFromFsData()
+}
+
 async function migrateGstRecoTables() {
   for (const tableName of ['gst_reco_records', 'gst_reco_input_tax_rows', 'gst_reco_history']) {
-    let columns = await query(`SHOW COLUMNS FROM ${tableName}`)
+    let columns
+    try {
+      columns = await query(`SHOW COLUMNS FROM ${tableName}`)
+    } catch (err) {
+      if (err?.code === 'ER_NO_SUCH_TABLE') {
+        await createGstRecoTables()
+        columns = await query(`SHOW COLUMNS FROM ${tableName}`)
+      } else {
+        throw err
+      }
+    }
+
     let columnNames = new Set(columns.map((col) => col.Field))
 
     const auditColumns = [

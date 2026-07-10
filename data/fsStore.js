@@ -32,6 +32,7 @@ import {
   getGstRecoForFs,
   saveGstRecoForFs,
 } from './gstRecoStore.js'
+import { applyGstSalesFromRecoToRevenue } from '../utils/gstRevenueLink.js'
 import {
   deleteLoansForBusiness,
   deleteLoansForFy,
@@ -152,6 +153,7 @@ export async function getFsData(clientId, fyId, businessId) {
   record.gstReco = gstReco
   record.loans = loans
   mergeNotesData(record, notesData)
+  record.noteSubAmounts = applyGstSalesFromRecoToRevenue(record.noteSubAmounts, gstReco)
   record.finalizationInfo = normalizeFinalizationInfo(record.finalizationInfo)
   record.savedAt = record.savedAt || record.updatedAt || new Date().toISOString()
   return record
@@ -192,6 +194,11 @@ export async function saveFsData(clientId, fyId, businessId, data, actor) {
     nextFinalization = normalizeFinalizationInfo()
   }
 
+  const noteSubAmountsForSave = applyGstSalesFromRecoToRevenue(
+    data.noteSubAmounts || {},
+    data.gstReco,
+  )
+
   const [udinDetails, depreciation, bankAccounts, gstReco, loans, notesData, statementSnapshot] =
     await Promise.all([
       saveUdinForFs(clientId, fyId, businessId, data.udinDetails, actor),
@@ -214,7 +221,7 @@ export async function saveFsData(clientId, fyId, businessId, data, actor) {
         businessId,
         {
           notes: data.notes,
-          noteSubAmounts: data.noteSubAmounts,
+          noteSubAmounts: noteSubAmountsForSave,
           administrativeExpenseLines: data.administrativeExpenseLines,
           otherShortTermBorrowingLines: data.otherShortTermBorrowingLines,
           manualNoteLines: data.manualNoteLines,
