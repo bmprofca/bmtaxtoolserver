@@ -807,12 +807,6 @@ app.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     const { clientId, fyId, businessId } = req.params
-    const client = await getClientById(clientId)
-
-    if (!client) {
-      return res.status(404).json({ error: 'Client not found' })
-    }
-
     res.json(await getFsData(clientId, fyId, businessId))
   }),
 )

@@ -132,39 +132,17 @@ export async function getFsData(clientId, fyId, businessId) {
     [clientId, fyId, businessId],
   )
 
-  if (!rows.length) {
-    const record = createEmptyFsRecord(clientId, fyId, businessId)
-    const [udinDetails, depreciation, bankAccounts, gstReco, loans, notesData, statementSnapshot] =
-      await Promise.all([
-        getUdinForFs(clientId, fyId, businessId),
-        getDepreciationForFs(clientId, fyId, businessId),
-        getBankAccountsForFs(clientId, fyId, businessId),
-        getGstRecoForFs(clientId, fyId, businessId),
-        getLoansForFs(clientId, fyId, businessId),
-        getNotesForFs(clientId, fyId, businessId),
-        getStatementForFs(clientId, fyId, businessId),
-      ])
-    record.udinDetails = udinDetails
-    record.depreciationSchedule = depreciation.depreciationSchedule
-    record.previousYearDepreciation = depreciation.previousYearDepreciation
-    record.bankAccounts = bankAccounts
-    record.gstReco = gstReco
-    record.loans = loans
-    mergeNotesData(record, notesData)
-    record.statementSnapshot = statementSnapshot
-    return record
-  }
+  const legacyPayload = rows.length ? parseJson(rows[0].payload) : null
+  const record = legacyPayload || createEmptyFsRecord(clientId, fyId, businessId)
 
-  const record = parseJson(rows[0].payload) || createEmptyFsRecord(clientId, fyId, businessId)
-  const [udinDetails, depreciation, bankAccounts, gstReco, loans, notesData, statementSnapshot] =
+  const [udinDetails, depreciation, bankAccounts, gstReco, loans, notesData] =
     await Promise.all([
       getUdinForFs(clientId, fyId, businessId),
       getDepreciationForFs(clientId, fyId, businessId),
-      getBankAccountsForFs(clientId, fyId, businessId),
+      getBankAccountsForFs(clientId, fyId, businessId, legacyPayload),
       getGstRecoForFs(clientId, fyId, businessId),
-      getLoansForFs(clientId, fyId, businessId),
+      getLoansForFs(clientId, fyId, businessId, legacyPayload),
       getNotesForFs(clientId, fyId, businessId),
-      getStatementForFs(clientId, fyId, businessId),
     ])
   record.udinDetails = udinDetails
   record.depreciationSchedule = depreciation.depreciationSchedule
@@ -173,7 +151,6 @@ export async function getFsData(clientId, fyId, businessId) {
   record.gstReco = gstReco
   record.loans = loans
   mergeNotesData(record, notesData)
-  record.statementSnapshot = statementSnapshot
   record.finalizationInfo = normalizeFinalizationInfo(record.finalizationInfo)
   record.savedAt = record.savedAt || record.updatedAt || new Date().toISOString()
   return record
