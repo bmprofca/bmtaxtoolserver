@@ -247,33 +247,33 @@ function serializeInputTaxRow(row) {
 function serializeGstReco(recordRow, inputRows) {
   return normalizeGstReco({
     sales: {
-      sales: recordRow.sales_amount,
-      igst: recordRow.sales_igst,
-      cgst: recordRow.sales_cgst,
-      sgst: recordRow.sales_sgst,
-      amendedSales: recordRow.amended_sales,
-      amendedIgst: recordRow.amended_igst,
-      amendedCgst: recordRow.amended_cgst,
-      amendedSgst: recordRow.amended_sgst,
+      sales: n(recordRow.sales_amount),
+      igst: n(recordRow.sales_igst),
+      cgst: n(recordRow.sales_cgst),
+      sgst: n(recordRow.sales_sgst),
+      amendedSales: n(recordRow.amended_sales),
+      amendedIgst: n(recordRow.amended_igst),
+      amendedCgst: n(recordRow.amended_cgst),
+      amendedSgst: n(recordRow.amended_sgst),
     },
     outwardTaxPaid: {
-      igstCreditToIgst: recordRow.ot_igst_to_igst,
-      igstCreditToCgst: recordRow.ot_igst_to_cgst,
-      igstCreditToSgst: recordRow.ot_igst_to_sgst,
-      cgstCreditToIgst: recordRow.ot_cgst_to_igst,
-      cgstCreditToCgst: recordRow.ot_cgst_to_cgst,
-      sgstCreditToIgst: recordRow.ot_sgst_to_igst,
-      sgstCreditToSgst: recordRow.ot_sgst_to_sgst,
-      cashIgst: recordRow.ot_cash_igst,
-      cashCgst: recordRow.ot_cash_cgst,
-      cashSgst: recordRow.ot_cash_sgst,
+      igstCreditToIgst: n(recordRow.ot_igst_to_igst),
+      igstCreditToCgst: n(recordRow.ot_igst_to_cgst),
+      igstCreditToSgst: n(recordRow.ot_igst_to_sgst),
+      cgstCreditToIgst: n(recordRow.ot_cgst_to_igst),
+      cgstCreditToCgst: n(recordRow.ot_cgst_to_cgst),
+      sgstCreditToIgst: n(recordRow.ot_sgst_to_igst),
+      sgstCreditToSgst: n(recordRow.ot_sgst_to_sgst),
+      cashIgst: n(recordRow.ot_cash_igst),
+      cashCgst: n(recordRow.ot_cash_cgst),
+      cashSgst: n(recordRow.ot_cash_sgst),
     },
     inputTax: {
       linkClosingToNotes: recordRow.link_closing_to_notes === 1,
       closingFromNotes: {
-        igst: recordRow.closing_from_notes_igst,
-        cgst: recordRow.closing_from_notes_cgst,
-        sgst: recordRow.closing_from_notes_sgst,
+        igst: n(recordRow.closing_from_notes_igst),
+        cgst: n(recordRow.closing_from_notes_cgst),
+        sgst: n(recordRow.closing_from_notes_sgst),
       },
       rows:
         inputRows.length > 0
@@ -282,28 +282,28 @@ function serializeGstReco(recordRow, inputRows) {
                 id: row.id,
                 type: row.row_type,
                 particular: row.particular,
-                igst: row.igst,
-                cgst: row.cgst,
-                sgst: row.sgst,
+                igst: n(row.igst),
+                cgst: n(row.cgst),
+                sgst: n(row.sgst),
               }),
             )
           : createInputTaxRows(),
     },
     simpleReco: {
       itcClaimedIn3bThisFy: {
-        igst: recordRow.sr_3b_igst,
-        cgst: recordRow.sr_3b_cgst,
-        sgst: recordRow.sr_3b_sgst,
+        igst: n(recordRow.sr_3b_igst),
+        cgst: n(recordRow.sr_3b_cgst),
+        sgst: n(recordRow.sr_3b_sgst),
       },
       itcPrevYearClaimedThisYear: {
-        igst: recordRow.sr_prev_igst,
-        cgst: recordRow.sr_prev_cgst,
-        sgst: recordRow.sr_prev_sgst,
+        igst: n(recordRow.sr_prev_igst),
+        cgst: n(recordRow.sr_prev_cgst),
+        sgst: n(recordRow.sr_prev_sgst),
       },
       itcAsPer2b: {
-        igst: recordRow.sr_2b_igst,
-        cgst: recordRow.sr_2b_cgst,
-        sgst: recordRow.sr_2b_sgst,
+        igst: n(recordRow.sr_2b_igst),
+        cgst: n(recordRow.sr_2b_cgst),
+        sgst: n(recordRow.sr_2b_sgst),
       },
     },
     linkSalesToRevenueNote: recordRow.link_sales_to_revenue_note === 1,
@@ -589,6 +589,10 @@ export async function saveGstRecoForFs(clientId, fyId, businessId, gstReco, acto
   const normalized = normalizeGstReco(gstReco)
 
   if (!isMeaningfulGstReco(normalized)) {
+    const existing = await getGstRecoForFs(clientId, fyId, businessId)
+    if (isMeaningfulGstReco(existing)) {
+      return existing
+    }
     await deleteGstRecoForFs(clientId, fyId, businessId)
     return createEmptyGstReco()
   }

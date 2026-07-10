@@ -32,7 +32,7 @@ import {
   getGstRecoForFs,
   saveGstRecoForFs,
 } from './gstRecoStore.js'
-import { applyGstSalesFromRecoToRevenue } from '../utils/gstRevenueLink.js'
+import { applyGstSalesFromRecoToRevenue, getGstTaxableSalesTotal } from '../utils/gstRevenueLink.js'
 import {
   deleteLoansForBusiness,
   deleteLoansForFy,
@@ -171,6 +171,14 @@ export async function saveFsData(clientId, fyId, businessId, data, actor) {
   let nextFinalization = normalizeFinalizationInfo(data?.finalizationInfo)
   const unlockCode = String(data?.unlockConfirmationCode || '').trim()
 
+  const incomingGstReco = normalizeGstReco(data?.gstReco)
+  const existingGstReco =
+    getGstTaxableSalesTotal(incomingGstReco) === 0
+      ? await getGstRecoForFs(clientId, fyId, businessId)
+      : incomingGstReco
+  const gstRecoForSave =
+    getGstTaxableSalesTotal(incomingGstReco) > 0 ? incomingGstReco : existingGstReco
+
   if (nextFinalization.isFinalized && !nextFinalization.lockToken && !nextFinalization.isUnlocked) {
     nextFinalization.lockToken = generateLockToken()
   }
@@ -196,7 +204,7 @@ export async function saveFsData(clientId, fyId, businessId, data, actor) {
 
   const noteSubAmountsForSave = applyGstSalesFromRecoToRevenue(
     data.noteSubAmounts || {},
-    data.gstReco,
+    gstRecoForSave,
   )
 
   const [udinDetails, depreciation, bankAccounts, gstReco, loans, notesData, statementSnapshot] =
@@ -213,7 +221,7 @@ export async function saveFsData(clientId, fyId, businessId, data, actor) {
         actor,
       ),
       saveBankAccountsForFs(clientId, fyId, businessId, data.bankAccounts, actor),
-      saveGstRecoForFs(clientId, fyId, businessId, data.gstReco, actor),
+      saveGstRecoForFs(clientId, fyId, businessId, gstRecoForSave, actor),
       saveLoansForFs(clientId, fyId, businessId, data.loans, actor),
       saveNotesForFs(
         clientId,
