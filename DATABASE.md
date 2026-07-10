@@ -67,3 +67,9 @@ npm run dev
 ```
 
 Check connection: `GET /api/health` should return `"database": "connected"`.
+
+## GST Reco schema on deploy
+
+`npm run db:ensure-gst` needs database credentials. On Hostinger the API gets them from hPanel env vars, but SSH deploy scripts need `nodejs/.env`.
+
+`deploy-live.sh` copies local `bmtaxtoolserver/.env` to the server before running `db:ensure-gst`. If `.env` is missing, deploy skips that step; tables are still created when the API starts (`initDatabase` on bootstrap).

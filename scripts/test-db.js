@@ -2,9 +2,11 @@ import dotenv from 'dotenv'
 import mysql from 'mysql2/promise'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { loadEnv } from '../utils/loadEnv.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-dotenv.config({ path: path.join(__dirname, '../.env') })
+const envStatus = loadEnv()
+dotenv.config({ path: path.join(__dirname, '../.env'), override: false })
 
 const config = {
   host: process.env.DB_HOST || 'localhost',

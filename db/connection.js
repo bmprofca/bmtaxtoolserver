@@ -2,9 +2,12 @@ import dotenv from 'dotenv'
 import mysql from 'mysql2/promise'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { loadEnv } from '../utils/loadEnv.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-dotenv.config({ path: path.join(__dirname, '../.env') })
+loadEnv()
+// Keep legacy path for tools that import connection before loadEnv existed.
+dotenv.config({ path: path.join(__dirname, '../.env'), override: false })
 
 const pool = mysql.createPool({
   host: process.env.DB_HOST || 'localhost',
