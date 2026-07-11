@@ -48,7 +48,7 @@ import {
   getStatementForFs,
   getStatementHistory,
 } from './data/statementStore.js'
-import { getLedgersWithUsage, saveLedgers } from './data/ledgerStore.js'
+import { getLedgersWithUsage, saveLedgers, createLedger } from './data/ledgerStore.js'
 import {
   getDeletedFinancialYears,
   getFinancialYears,
@@ -1239,6 +1239,16 @@ app.get(
   asyncHandler(async (_req, res) => {
     const ledgers = await getLedgersWithUsage()
     res.json({ ledgers })
+  }),
+)
+
+app.post(
+  '/api/ledgers',
+  requireAuth,
+  requirePermission('manageFs'),
+  asyncHandler(async (req, res) => {
+    const result = await createLedger(req.body, req.user)
+    res.status(result.created ? 201 : 200).json(result)
   }),
 )
 

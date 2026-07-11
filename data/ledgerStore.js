@@ -338,6 +338,7 @@ export async function buildLedgerUsageFlags(ledgers) {
 }
 
 export async function getLedgersWithUsage() {
+  await reloadActiveLedgers()
   const ledgers = getLedgers()
   const usageFlags = await buildLedgerUsageFlags(ledgers)
   return ledgers.map((ledger) => serializeLedger(ledger, Boolean(usageFlags[ledger.id])))
@@ -448,6 +449,35 @@ function assertNoDuplicateLedgers(ledgers) {
   }
 }
 
+export async function createLedger(payload, actor) {
+  const ledger = normalizeLedger(payload)
+  if (!ledger.name) {
+    throw new Error('Ledger name is required')
+  }
+
+  await reloadActiveLedgers()
+  const existing = getLedgers()
+  const duplicate = findDuplicateLedgerInList(existing, ledger)
+  if (duplicate) {
+    const usageFlags = await buildLedgerUsageFlags(existing)
+    return {
+      ledger: serializeLedger(duplicate, Boolean(usageFlags[duplicate.id])),
+      created: false,
+    }
+  }
+
+  const sortOrder = existing.length
+  await insertLedgerRow(ledger, sortOrder, actor)
+  await reloadActiveLedgers()
+
+  const saved = getLedgers().find((item) => item.id === ledger.id) || ledger
+  const usageFlags = await buildLedgerUsageFlags(getLedgers())
+  return {
+    ledger: serializeLedger(saved, Boolean(usageFlags[saved.id])),
+    created: true,
+  }
+}
+
 export async function saveLedgers(ledgers, actor) {
   const normalized = (ledgers || [])
     .map(normalizeLedger)
@@ -482,5 +512,6 @@ export async function saveLedgers(ledgers, actor) {
     }
   }
 
+  await reloadActiveLedgers()
   return getLedgersWithUsage()
 }
