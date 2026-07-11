@@ -71,11 +71,13 @@ import {
 import { createUser, deactivateUser, getDeletedUsers, getUsers, regenerateUserToken, changeUserPassword, restoreUser, updateAppUser, updateUserProfile } from './data/userStore.js'
 import { hasPermission } from './data/userPermissions.js'
 import { bootstrapDataStores } from './bootstrap.js'
-import { testConnection } from './db/connection.js'
+import { isRateLimitDbError, testConnection } from './db/connection.js'
 
 const app = express()
 const PORT = process.env.PORT || 3001
 app.locals.bootstrapError = null
+let lastBootstrapRetryAt = 0
+const BOOTSTRAP_RETRY_MS = 5 * 60 * 1000
 
 app.set('trust proxy', 1)
 app.use(cors())
@@ -136,13 +138,22 @@ app.use('/api', async (req, res, next) => {
     return next()
   }
 
+  const now = Date.now()
+  if (now - lastBootstrapRetryAt < BOOTSTRAP_RETRY_MS) {
+    return res.status(503).json({
+      error: `Database is unavailable: ${app.locals.bootstrapError}`,
+    })
+  }
+  lastBootstrapRetryAt = now
+
   try {
     await bootstrapDataStores()
     app.locals.bootstrapError = null
     return next()
   } catch (err) {
+    app.locals.bootstrapError = err.message || app.locals.bootstrapError
     return res.status(503).json({
-      error: `Database is unavailable: ${err.message || app.locals.bootstrapError}`,
+      error: `Database is unavailable: ${app.locals.bootstrapError}`,
     })
   }
 })
@@ -1284,7 +1295,11 @@ async function startServer() {
     await bootstrapDataStores()
   } catch (err) {
     app.locals.bootstrapError = err.message || 'Unknown bootstrap error'
-    console.error('Server started in degraded mode:', app.locals.bootstrapError)
+    if (isRateLimitDbError(err)) {
+      console.error('Server started in degraded mode (MySQL rate limit):', app.locals.bootstrapError)
+    } else {
+      console.error('Server started in degraded mode:', app.locals.bootstrapError)
+    }
   }
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://localhost:${PORT}`)

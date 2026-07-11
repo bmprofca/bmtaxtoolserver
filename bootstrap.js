@@ -5,8 +5,13 @@ import { loadFinancialYears } from './data/fySettingsStore.js'
 import { loadCaSettings } from './data/caSettingsStore.js'
 import { loadLedgers } from './data/ledgerStore.js'
 
+let schemaInitialized = false
+
 export async function bootstrapDataStores() {
   await verifyConnection()
-  await initDatabase()
+  if (!schemaInitialized) {
+    await initDatabase()
+    schemaInitialized = true
+  }
   await Promise.all([loadFinancialYears(), loadCaSettings(), loadLedgers(), loadClients()])
 }
