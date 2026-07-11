@@ -2,7 +2,7 @@ import { query } from '../db/connection.js'
 import { parseJson } from '../db/init.js'
 import { getPanValidationMessage, normalizePan } from './clientValidation.js'
 
-const BUSINESS_ACTION_PASSWORD = '12345'
+const BUSINESS_ACTION_PASSWORD = '123456'
 
 const BUSINESS_COLUMNS = `id, client_id, name, type, pan, address, starting_fy, starting_year,
   gst_number, status, is_deleted, deleted_at, created_at`
