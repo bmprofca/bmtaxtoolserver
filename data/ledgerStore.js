@@ -1,5 +1,5 @@
 import { query } from '../db/connection.js'
-import { getSetting } from '../db/init.js'
+import { getSetting, parseJson } from '../db/init.js'
 
 const LEDGER_COLUMNS = `id, name, note_group, sign, sort_order, is_deleted, deleted_at, created_at`
 
@@ -78,13 +78,269 @@ function rowToLedger(row) {
   }
 }
 
-function serializeLedger(ledger) {
+function serializeLedger(ledger, hasEntries = false) {
   return {
     id: ledger.id,
     name: ledger.name,
     group: ledger.group,
     sign: ledger.sign,
+    hasEntries: Boolean(hasEntries),
   }
+}
+
+const ADMIN_EXPENSE_LEGACY_LABELS = {
+  rent: 'rent',
+  'electricity-water': 'electricity water',
+  'telephone-internet': 'telephone internet',
+  'printing-stationery': 'printing stationery',
+  'travelling-conveyance': 'travelling conveyance',
+  'legal-professional': 'legal professional fees',
+  'audit-fees': 'audit fees',
+  insurance: 'insurance',
+  'repairs-maintenance': 'repairs maintenance',
+  advertisement: 'advertisement publicity',
+  'office-expenses': 'office expenses',
+  commission: 'commission',
+  'bank-charges': 'bank charges',
+  'rates-taxes': 'rates taxes',
+  donations: 'donations',
+  miscellaneous: 'miscellaneous expenses',
+  others: 'others',
+}
+
+function normalizeLedgerMatchName(value) {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+function ledgerNamesMatch(left, right) {
+  const a = normalizeLedgerMatchName(left)
+  const b = normalizeLedgerMatchName(right)
+  if (!a || !b) {
+    return false
+  }
+  if (a === b) {
+    return true
+  }
+  if (a === b.replace(/s$/, '') || b === a.replace(/s$/, '')) {
+    return true
+  }
+  return a.includes(b) || b.includes(a)
+}
+
+function ledgerMatchesReference(ledger, referenceId) {
+  const ref = String(referenceId ?? '').trim()
+  if (!ref) {
+    return false
+  }
+  if (ref === ledger.id) {
+    return true
+  }
+  if (ledgerNamesMatch(ref, ledger.name)) {
+    return true
+  }
+  const legacyLabel = ADMIN_EXPENSE_LEGACY_LABELS[ref]
+  if (legacyLabel && ledger.group === 'otherAdministrativeExpenses') {
+    return ledgerNamesMatch(legacyLabel, ledger.name)
+  }
+  return false
+}
+
+function amountHasValue(amount) {
+  return Math.abs(Number(amount?.current) || 0) > 0 || Math.abs(Number(amount?.previous) || 0) > 0
+}
+
+function collectUsedReferencesFromPayload(payload, usedReferences) {
+  if (!payload || typeof payload !== 'object') {
+    return
+  }
+
+  const pushReference = (referenceId) => {
+    const ref = String(referenceId ?? '').trim()
+    if (ref) {
+      usedReferences.add(ref)
+    }
+  }
+
+  const adminLines = payload.administrativeExpenseLines || []
+  const adminSubs = payload.noteSubAmounts?.otherAdministrativeExpenses || {}
+  for (const line of adminLines) {
+    const subId = `admin-line-${line.id}`
+    if (amountHasValue(adminSubs[subId])) {
+      pushReference(line.categoryId)
+    }
+  }
+
+  const dynamicLineCollections = [
+    {
+      lines: payload.otherShortTermBorrowingLines || [],
+      prefix: 'manual-st-',
+      subs: payload.noteSubAmounts?.shortTermBorrowings || {},
+      refKey: 'typeId',
+    },
+    {
+      lines: payload.manualNoteLines || [],
+      prefix: 'manual-nl-',
+      subs: {},
+      refKey: 'typeId',
+      subResolver: (line) => payload.noteSubAmounts?.[line.noteKey]?.[`manual-nl-${line.id}`],
+    },
+    {
+      lines: payload.capitalAccountLines || [],
+      prefix: 'capital-line-',
+      subs: payload.noteSubAmounts?.capitalAccount || {},
+      refKey: 'typeId',
+    },
+    {
+      lines: payload.cogsExtraLines || [],
+      prefix: 'cogs-line-',
+      subs: payload.noteSubAmounts?.costOfGoodsSold || {},
+      refKey: 'typeId',
+    },
+    {
+      lines: payload.plAppropriationLines || [],
+      prefix: 'pl-appr-',
+      subs: payload.plAppropriationAmounts || {},
+      refKey: 'categoryId',
+    },
+  ]
+
+  for (const collection of dynamicLineCollections) {
+    for (const line of collection.lines) {
+      const subId = `${collection.prefix}${line.id}`
+      const amount =
+        typeof collection.subResolver === 'function'
+          ? collection.subResolver(line)
+          : collection.subs[subId]
+      if (amountHasValue(amount)) {
+        pushReference(line[collection.refKey])
+      }
+    }
+  }
+
+  for (const subs of Object.values(payload.noteSubAmounts || {})) {
+    if (!subs || typeof subs !== 'object') {
+      continue
+    }
+    for (const [subId, amount] of Object.entries(subs)) {
+      if (!amountHasValue(amount) || !subId.startsWith('ledger-')) {
+        continue
+      }
+      pushReference(subId.slice('ledger-'.length))
+    }
+  }
+
+  for (const row of payload.depreciationSchedule || []) {
+    pushReference(row.ledgerId)
+  }
+}
+
+async function collectUsedLedgerReferences() {
+  const usedReferences = new Set()
+
+  const ledgerSubRows = await query(
+    `SELECT DISTINCT SUBSTRING(sub_id, 8) AS ledger_id
+     FROM note_sub_amount_rows
+     WHERE sub_id LIKE 'ledger-%'
+       AND (current_amount != 0 OR previous_amount != 0)`,
+  )
+  for (const row of ledgerSubRows) {
+    if (row.ledger_id) {
+      usedReferences.add(row.ledger_id)
+    }
+  }
+
+  const lineRefRows = await query(
+    `SELECT DISTINCT l.reference_id
+     FROM note_line_rows l
+     INNER JOIN note_sub_amount_rows s
+       ON s.client_id = l.client_id
+      AND s.fy_id = l.fy_id
+      AND s.business_id = l.business_id
+     WHERE l.reference_id != ''
+       AND (s.current_amount != 0 OR s.previous_amount != 0)
+       AND (
+         (l.line_kind = 'admin_expense' AND s.sub_id = CONCAT('admin-line-', l.id))
+         OR (l.line_kind = 'short_term_borrowing' AND s.sub_id = CONCAT('manual-st-', l.id))
+         OR (l.line_kind = 'manual_note' AND s.sub_id = CONCAT('manual-nl-', l.id))
+         OR (l.line_kind = 'capital_account' AND s.sub_id = CONCAT('capital-line-', l.id))
+         OR (l.line_kind = 'cogs_extra' AND s.sub_id = CONCAT('cogs-line-', l.id))
+         OR (l.line_kind = 'pl_appropriation' AND s.sub_id = CONCAT('pl-appr-', l.id))
+       )`,
+  )
+  for (const row of lineRefRows) {
+    usedReferences.add(row.reference_id)
+  }
+
+  const directLineRefs = await query(
+    `SELECT DISTINCT l.reference_id
+     FROM note_line_rows l
+     WHERE l.reference_id != ''
+       AND EXISTS (
+         SELECT 1
+         FROM note_sub_amount_rows s
+         WHERE s.client_id = l.client_id
+           AND s.fy_id = l.fy_id
+           AND s.business_id = l.business_id
+           AND (s.current_amount != 0 OR s.previous_amount != 0)
+           AND (
+             (l.line_kind = 'admin_expense' AND s.note_key = 'otherAdministrativeExpenses' AND s.sub_id = CONCAT('admin-line-', l.id))
+             OR (l.line_kind = 'short_term_borrowing' AND s.note_key = 'shortTermBorrowings' AND s.sub_id = CONCAT('manual-st-', l.id))
+             OR (l.line_kind = 'manual_note' AND s.note_key = l.note_key AND s.sub_id = CONCAT('manual-nl-', l.id))
+             OR (l.line_kind = 'capital_account' AND s.note_key = 'capitalAccount' AND s.sub_id = CONCAT('capital-line-', l.id))
+             OR (l.line_kind = 'cogs_extra' AND s.note_key = 'costOfGoodsSold' AND s.sub_id = CONCAT('cogs-line-', l.id))
+             OR (l.line_kind = 'pl_appropriation' AND s.note_key = '__plAppropriation' AND s.sub_id = CONCAT('pl-appr-', l.id))
+           )
+       )`,
+  )
+  for (const row of directLineRefs) {
+    usedReferences.add(row.reference_id)
+  }
+
+  const depSchedule = await query(
+    `SELECT DISTINCT ledger_id
+     FROM depreciation_schedule_rows
+     WHERE ledger_id IS NOT NULL AND ledger_id != ''`,
+  )
+  const depHistory = await query(
+    `SELECT DISTINCT ledger_id
+     FROM asset_depreciation_history
+     WHERE ledger_id IS NOT NULL AND ledger_id != ''`,
+  )
+  for (const row of [...depSchedule, ...depHistory]) {
+    if (row.ledger_id) {
+      usedReferences.add(row.ledger_id)
+    }
+  }
+
+  const fsRows = await query('SELECT payload FROM fs_data')
+  for (const row of fsRows) {
+    collectUsedReferencesFromPayload(parseJson(row.payload), usedReferences)
+  }
+
+  return usedReferences
+}
+
+export async function buildLedgerUsageFlags(ledgers) {
+  const usedReferences = await collectUsedLedgerReferences()
+  const flags = {}
+
+  for (const ledger of ledgers) {
+    flags[ledger.id] = [...usedReferences].some((referenceId) =>
+      ledgerMatchesReference(ledger, referenceId),
+    )
+  }
+
+  return flags
+}
+
+export async function getLedgersWithUsage() {
+  const ledgers = getLedgers()
+  const usageFlags = await buildLedgerUsageFlags(ledgers)
+  return ledgers.map((ledger) => serializeLedger(ledger, Boolean(usageFlags[ledger.id])))
 }
 
 async function fetchLedgerRows(whereClause = '', params = []) {
@@ -163,17 +419,56 @@ export function getLedgers() {
   return globalLedgers
 }
 
+function ledgerDuplicateKey(ledger) {
+  return `${ledger.group}|${String(ledger.name ?? '').trim().toLowerCase()}`
+}
+
+function findDuplicateLedgerInList(ledgers, candidate) {
+  const name = String(candidate.name ?? '').trim()
+  if (!name) {
+    return null
+  }
+
+  const key = ledgerDuplicateKey({ ...candidate, name })
+  return (
+    ledgers.find(
+      (ledger) => ledger.id !== candidate.id && ledgerDuplicateKey(ledger) === key,
+    ) ?? null
+  )
+}
+
+function assertNoDuplicateLedgers(ledgers) {
+  for (const ledger of ledgers) {
+    const duplicate = findDuplicateLedgerInList(ledgers, ledger)
+    if (duplicate) {
+      throw new Error(
+        `Duplicate ledger name "${ledger.name}" is not allowed in the same note group.`,
+      )
+    }
+  }
+}
+
 export async function saveLedgers(ledgers, actor) {
   const normalized = (ledgers || [])
     .map(normalizeLedger)
     .filter((item) => item.name.length > 0)
 
+  assertNoDuplicateLedgers(normalized)
+
   const incomingIds = new Set(normalized.map((item) => item.id))
   const existingRows = await fetchLedgerRows('WHERE is_deleted = 0')
   const existingIds = new Set(existingRows.map((row) => row.id))
+  const existingLedgers = existingRows.map((row) => serializeLedger(rowToLedger(row)))
+  const usageFlags = await buildLedgerUsageFlags(existingLedgers)
 
   for (const row of existingRows) {
     if (!incomingIds.has(row.id)) {
+      const ledger = rowToLedger(row)
+      if (usageFlags[ledger.id]) {
+        throw new Error(
+          `Cannot delete "${ledger.name}" because transaction entries exist in current or past years.`,
+        )
+      }
       await query('DELETE FROM ledgers WHERE id = ?', [row.id])
     }
   }
@@ -187,5 +482,5 @@ export async function saveLedgers(ledgers, actor) {
     }
   }
 
-  return reloadActiveLedgers()
+  return getLedgersWithUsage()
 }

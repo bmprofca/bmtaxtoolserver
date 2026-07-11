@@ -338,6 +338,58 @@ export async function initDatabase() {
   await migrateDepreciationFromFsData()
 
   await query(`
+    CREATE TABLE IF NOT EXISTS bank_accounts (
+      id VARCHAR(50) NOT NULL,
+      client_id VARCHAR(50) NOT NULL,
+      business_id VARCHAR(50) NOT NULL,
+      bank_name VARCHAR(255) NOT NULL DEFAULT '',
+      account_number VARCHAR(100) NOT NULL DEFAULT '',
+      account_type VARCHAR(20) NOT NULL DEFAULT 'current',
+      status VARCHAR(20) NOT NULL DEFAULT 'active',
+      closed_in_fy_id VARCHAR(50) NULL,
+      started_in_fy_id VARCHAR(50) NULL,
+      sort_order INT NOT NULL DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      created_by_user_id VARCHAR(50) NULL,
+      created_by_username VARCHAR(100) NULL,
+      created_by_name VARCHAR(255) NULL,
+      updated_by_user_id VARCHAR(50) NULL,
+      updated_by_username VARCHAR(100) NULL,
+      updated_by_name VARCHAR(255) NULL,
+      updated_at TIMESTAMP NULL,
+      PRIMARY KEY (client_id, business_id, id),
+      INDEX idx_bank_accounts_business (client_id, business_id),
+      INDEX idx_bank_accounts_lookup (client_id, business_id, account_number)
+    )
+  `)
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS bank_account_fy_figures (
+      bank_account_id VARCHAR(50) NOT NULL,
+      client_id VARCHAR(50) NOT NULL,
+      business_id VARCHAR(50) NOT NULL,
+      fy_id VARCHAR(50) NOT NULL,
+      opening_balance DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      debit DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      credit DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      bank_charge DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      interest DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      closing_balance DECIMAL(18, 2) NOT NULL DEFAULT 0,
+      sort_order INT NOT NULL DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      created_by_user_id VARCHAR(50) NULL,
+      created_by_username VARCHAR(100) NULL,
+      created_by_name VARCHAR(255) NULL,
+      updated_by_user_id VARCHAR(50) NULL,
+      updated_by_username VARCHAR(100) NULL,
+      updated_by_name VARCHAR(255) NULL,
+      updated_at TIMESTAMP NULL,
+      PRIMARY KEY (client_id, business_id, fy_id, bank_account_id),
+      INDEX idx_bank_fy_figures_account (client_id, business_id, bank_account_id)
+    )
+  `)
+
+  await query(`
     CREATE TABLE IF NOT EXISTS bank_account_rows (
       id VARCHAR(50) NOT NULL,
       client_id VARCHAR(50) NOT NULL,
@@ -348,6 +400,7 @@ export async function initDatabase() {
       account_type VARCHAR(20) NOT NULL DEFAULT 'current',
       status VARCHAR(20) NOT NULL DEFAULT 'active',
       closed_in_fy_id VARCHAR(50) NULL,
+      started_in_fy_id VARCHAR(50) NULL,
       opening_balance DECIMAL(18, 2) NOT NULL DEFAULT 0,
       debit DECIMAL(18, 2) NOT NULL DEFAULT 0,
       credit DECIMAL(18, 2) NOT NULL DEFAULT 0,
@@ -383,6 +436,7 @@ export async function initDatabase() {
       account_type VARCHAR(20) NOT NULL DEFAULT 'current',
       status VARCHAR(20) NOT NULL DEFAULT 'active',
       closed_in_fy_id VARCHAR(50) NULL,
+      started_in_fy_id VARCHAR(50) NULL,
       opening_balance DECIMAL(18, 2) NOT NULL DEFAULT 0,
       debit DECIMAL(18, 2) NOT NULL DEFAULT 0,
       credit DECIMAL(18, 2) NOT NULL DEFAULT 0,
@@ -1429,6 +1483,7 @@ async function migrateBankAccountTables() {
     const lifecycleColumns = [
       ['status', "VARCHAR(20) NOT NULL DEFAULT 'active' AFTER account_type"],
       ['closed_in_fy_id', 'VARCHAR(50) NULL AFTER status'],
+      ['started_in_fy_id', 'VARCHAR(50) NULL AFTER closed_in_fy_id'],
     ]
 
     for (const [name, definition] of lifecycleColumns) {
@@ -1440,6 +1495,24 @@ async function migrateBankAccountTables() {
   }
 
   await ensureFyScopedCompositePrimaryKey('bank_account_rows')
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS bank_account_exclusions (
+      client_id VARCHAR(50) NOT NULL,
+      business_id VARCHAR(50) NOT NULL,
+      bank_account_id VARCHAR(50) NOT NULL,
+      excluded_from_fy_id VARCHAR(50) NOT NULL,
+      excluded_from_fy_start_year INT NOT NULL DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (client_id, business_id, bank_account_id),
+      INDEX idx_bank_account_exclusions_year (client_id, business_id, excluded_from_fy_start_year)
+    )
+  `)
+
+  const { backfillBankAccountStartedInFyFromHistory, migrateBankAccountsToGlobalModel } =
+    await import('../data/bankAccountStore.js')
+  await migrateBankAccountsToGlobalModel()
+  await backfillBankAccountStartedInFyFromHistory()
 }
 
 async function migrateUdinRecordsTable() {
