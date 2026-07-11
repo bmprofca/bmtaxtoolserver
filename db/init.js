@@ -1509,9 +1509,10 @@ async function migrateBankAccountTables() {
     )
   `)
 
-  const { backfillBankAccountStartedInFyFromHistory, migrateBankAccountsToGlobalModel } =
+  const { backfillBankAccountStartedInFyFromHistory, migrateBankAccountsToGlobalModel, deduplicateAllBankAccountHistory } =
     await import('../data/bankAccountStore.js')
   await migrateBankAccountsToGlobalModel()
+  await deduplicateAllBankAccountHistory()
   await backfillBankAccountStartedInFyFromHistory()
 }
 

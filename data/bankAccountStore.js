@@ -152,6 +152,92 @@ function figureRowHasValues(row) {
   )
 }
 
+function historyRowHasValues(row) {
+  return figureRowHasValues(row)
+}
+
+async function deduplicateBankAccountHistoryForBusiness(clientId, businessId) {
+  const duplicateGroups = await query(
+    `SELECT client_id, business_id, fy_id, bank_account_id, COUNT(*) AS row_count
+     FROM bank_account_history
+     WHERE client_id = ? AND business_id = ?
+     GROUP BY client_id, business_id, fy_id, bank_account_id
+     HAVING row_count > 1`,
+    [clientId, businessId],
+  )
+
+  for (const group of duplicateGroups) {
+    const rows = await query(
+      `SELECT id, opening_balance, debit, credit, bank_charge, interest, closing_balance,
+              updated_at, created_at
+       FROM bank_account_history
+       WHERE client_id = ? AND business_id = ? AND fy_id = ? AND bank_account_id = ?
+       ORDER BY
+         (opening_balance <> 0 OR debit <> 0 OR credit <> 0 OR bank_charge <> 0 OR interest <> 0 OR closing_balance <> 0) DESC,
+         COALESCE(updated_at, created_at) DESC,
+         created_at DESC`,
+      [clientId, businessId, group.fy_id, group.bank_account_id],
+    )
+
+    const [, ...duplicates] = rows
+    for (const row of duplicates) {
+      await query('DELETE FROM bank_account_history WHERE id = ?', [row.id])
+    }
+  }
+}
+
+async function mergeDuplicateHistoryIntoKeeper(clientId, businessId, keeperId, duplicateId) {
+  const duplicateHistory = await query(
+    `SELECT fy_id, opening_balance, debit, credit, bank_charge, interest, closing_balance
+     FROM bank_account_history
+     WHERE client_id = ? AND business_id = ? AND bank_account_id = ?`,
+    [clientId, businessId, duplicateId],
+  )
+
+  for (const row of duplicateHistory) {
+    const keeperRows = await query(
+      `SELECT id, opening_balance, debit, credit, bank_charge, interest, closing_balance
+       FROM bank_account_history
+       WHERE client_id = ? AND business_id = ? AND bank_account_id = ? AND fy_id = ?`,
+      [clientId, businessId, keeperId, row.fy_id],
+    )
+
+    if (!keeperRows.length) {
+      await query(
+        `UPDATE bank_account_history
+         SET bank_account_id = ?
+         WHERE client_id = ? AND business_id = ? AND bank_account_id = ? AND fy_id = ?`,
+        [keeperId, clientId, businessId, duplicateId, row.fy_id],
+      )
+      continue
+    }
+
+    const keeperRow = keeperRows[0]
+    if (!historyRowHasValues(keeperRow) && historyRowHasValues(row)) {
+      await query(
+        `UPDATE bank_account_history
+         SET opening_balance = ?, debit = ?, credit = ?, bank_charge = ?, interest = ?, closing_balance = ?
+         WHERE id = ?`,
+        [
+          row.opening_balance,
+          row.debit,
+          row.credit,
+          row.bank_charge,
+          row.interest,
+          row.closing_balance,
+          keeperRow.id,
+        ],
+      )
+    }
+
+    await query(
+      `DELETE FROM bank_account_history
+       WHERE client_id = ? AND business_id = ? AND bank_account_id = ? AND fy_id = ?`,
+      [clientId, businessId, duplicateId, row.fy_id],
+    )
+  }
+}
+
 function pickKeeperMasterRow(rows, fyStartYearById) {
   return [...rows].sort((left, right) => {
     const leftClosed = normalizeBankAccountStatus(left.status) === 'closed' ? 0 : 1
@@ -256,12 +342,7 @@ async function mergeDuplicateMasterIntoKeeper(clientId, businessId, keeperId, du
     )
   }
 
-  await query(
-    `UPDATE bank_account_history
-     SET bank_account_id = ?
-     WHERE client_id = ? AND business_id = ? AND bank_account_id = ?`,
-    [keeperId, clientId, businessId, duplicateId],
-  )
+  await mergeDuplicateHistoryIntoKeeper(clientId, businessId, keeperId, duplicateId)
 
   await query('DELETE FROM bank_accounts WHERE id = ? AND client_id = ? AND business_id = ?', [
     duplicateId,
@@ -271,6 +352,8 @@ async function mergeDuplicateMasterIntoKeeper(clientId, businessId, keeperId, du
 }
 
 async function consolidateDuplicateBankMasters(clientId, businessId) {
+  await deduplicateBankAccountHistoryForBusiness(clientId, businessId)
+
   const fyStartYearById = await buildFyStartYearMap()
   const masters = await fetchMasterAccounts(clientId, businessId)
   const groups = new Map()
@@ -647,9 +730,9 @@ async function upsertBankAccountHistory(clientId, businessId, fyId, fyMeta, acco
        bank_charge = VALUES(bank_charge),
        interest = VALUES(interest),
        closing_balance = VALUES(closing_balance),
-       updated_by_user_id = VALUES(updated_by_user_id),
-       updated_by_username = VALUES(updated_by_username),
-       updated_by_name = VALUES(updated_by_name),
+       updated_by_user_id = VALUES(created_by_user_id),
+       updated_by_username = VALUES(created_by_username),
+       updated_by_name = VALUES(created_by_name),
        updated_at = CURRENT_TIMESTAMP`,
     [
       historyId,
@@ -787,6 +870,15 @@ async function buildAccountsForFy(clientId, fyId, businessId) {
     }
     return left.accountNumber.localeCompare(right.accountNumber)
   })
+}
+
+export async function deduplicateAllBankAccountHistory() {
+  const scopes = await query(
+    `SELECT DISTINCT client_id, business_id FROM bank_account_history`,
+  )
+  for (const scope of scopes) {
+    await deduplicateBankAccountHistoryForBusiness(scope.client_id, scope.business_id)
+  }
 }
 
 export async function migrateBankAccountsToGlobalModel() {
