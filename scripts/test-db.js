@@ -40,8 +40,14 @@ async function getPublicIp() {
 async function main() {
   printConfig()
 
-  if (!config.user || !config.password || !config.database) {
-    console.error('FAIL: Missing DB_USER, DB_PASSWORD, or DB_NAME in server/.env')
+  if (!config.user || !config.database) {
+    console.error('FAIL: Missing DB_USER or DB_NAME in server/.env')
+    process.exit(1)
+  }
+
+  const isLocalHost = config.host === 'localhost' || config.host === '127.0.0.1'
+  if (!isLocalHost && !config.password) {
+    console.error('FAIL: Missing DB_PASSWORD in server/.env')
     process.exit(1)
   }
 

@@ -3,6 +3,7 @@ import { parseJson } from '../db/init.js'
 
 const UDIN_COLUMNS = `id, client_id, fy_id, business_id, ca_profile_id,
   ca_partner_name, ca_firm_name, udin_number, issue_date, enabled,
+  seal_attachment_name, seal_attachment_data_url, seal_offset_x, seal_offset_y,
   created_at, updated_at`
 
 function generateId() {
@@ -29,7 +30,23 @@ export function normalizeUdinDetails(raw = {}) {
     udinDate: String(raw.udinDate || raw.issue_date || '').trim(),
     caPartnerName: String(raw.caPartnerName || raw.ca_partner_name || '').trim(),
     caFirmName: String(raw.caFirmName || raw.ca_firm_name || '').trim(),
+    sealAttachmentName: String(
+      raw.sealAttachmentName || raw.seal_attachment_name || '',
+    ).trim(),
+    sealAttachmentDataUrl: String(
+      raw.sealAttachmentDataUrl || raw.seal_attachment_data_url || '',
+    ).trim(),
+    sealOffsetX: clampSealOffset(raw.sealOffsetX ?? raw.seal_offset_x, 82),
+    sealOffsetY: clampSealOffset(raw.sealOffsetY ?? raw.seal_offset_y, 50),
   }
+}
+
+function clampSealOffset(value, fallback) {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) {
+    return fallback
+  }
+  return Math.min(100, Math.max(0, parsed))
 }
 
 function serializeUdinDetails(row) {
@@ -48,6 +65,10 @@ function serializeUdinDetails(row) {
     udinDate: issueDate,
     caPartnerName: row.ca_partner_name || '',
     caFirmName: row.ca_firm_name || '',
+    sealAttachmentName: row.seal_attachment_name || '',
+    sealAttachmentDataUrl: row.seal_attachment_data_url || '',
+    sealOffsetX: clampSealOffset(row.seal_offset_x, 82),
+    sealOffsetY: clampSealOffset(row.seal_offset_y, 50),
   }
 }
 
@@ -136,8 +157,9 @@ export async function saveUdinForFs(clientId, fyId, businessId, udinDetails, act
       `INSERT INTO udin_records (
          id, client_id, fy_id, business_id, ca_profile_id,
          ca_partner_name, ca_firm_name, udin_number, issue_date, enabled,
+         seal_attachment_name, seal_attachment_data_url, seal_offset_x, seal_offset_y,
          created_by_user_id, created_by_username, created_by_name
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         clientId,
@@ -149,6 +171,10 @@ export async function saveUdinForFs(clientId, fyId, businessId, udinDetails, act
         normalized.udinNumber,
         issueDate,
         enabled,
+        normalized.sealAttachmentName,
+        normalized.sealAttachmentDataUrl || null,
+        normalized.sealOffsetX,
+        normalized.sealOffsetY,
         userId,
         username,
         name,
@@ -163,6 +189,10 @@ export async function saveUdinForFs(clientId, fyId, businessId, udinDetails, act
            udin_number = ?,
            issue_date = ?,
            enabled = ?,
+           seal_attachment_name = ?,
+           seal_attachment_data_url = ?,
+           seal_offset_x = ?,
+           seal_offset_y = ?,
            updated_by_user_id = ?,
            updated_by_username = ?,
            updated_by_name = ?,
@@ -175,6 +205,10 @@ export async function saveUdinForFs(clientId, fyId, businessId, udinDetails, act
         normalized.udinNumber,
         issueDate,
         enabled,
+        normalized.sealAttachmentName,
+        normalized.sealAttachmentDataUrl || null,
+        normalized.sealOffsetX,
+        normalized.sealOffsetY,
         userId,
         username,
         name,

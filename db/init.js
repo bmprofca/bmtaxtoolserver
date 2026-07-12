@@ -225,6 +225,10 @@ export async function initDatabase() {
       udin_number VARCHAR(100) NOT NULL DEFAULT '',
       issue_date DATE NULL,
       enabled TINYINT(1) NOT NULL DEFAULT 0,
+      seal_attachment_name VARCHAR(255) NOT NULL DEFAULT '',
+      seal_attachment_data_url LONGTEXT NULL,
+      seal_offset_x DECIMAL(5,2) NOT NULL DEFAULT 82,
+      seal_offset_y DECIMAL(5,2) NOT NULL DEFAULT 50,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       created_by_user_id VARCHAR(50) NULL,
       created_by_username VARCHAR(100) NULL,
@@ -1528,6 +1532,10 @@ async function migrateUdinRecordsTable() {
     ['updated_by_username', 'VARCHAR(100) NULL AFTER updated_by_user_id'],
     ['updated_by_name', 'VARCHAR(255) NULL AFTER updated_by_username'],
     ['updated_at', 'TIMESTAMP NULL AFTER updated_by_name'],
+    ['seal_attachment_name', 'VARCHAR(255) NOT NULL DEFAULT \'\' AFTER enabled'],
+    ['seal_attachment_data_url', 'LONGTEXT NULL AFTER seal_attachment_name'],
+    ['seal_offset_x', 'DECIMAL(5,2) NOT NULL DEFAULT 82 AFTER seal_attachment_data_url'],
+    ['seal_offset_y', 'DECIMAL(5,2) NOT NULL DEFAULT 50 AFTER seal_offset_x'],
   ]
 
   for (const [name, definition] of auditColumns) {

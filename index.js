@@ -76,6 +76,7 @@ import { isRateLimitDbError, testConnection } from './db/connection.js'
 const app = express()
 const PORT = process.env.PORT || 3001
 app.locals.bootstrapError = null
+app.locals.dbReady = false
 let lastBootstrapRetryAt = 0
 const BOOTSTRAP_RETRY_MS = 5 * 60 * 1000
 
@@ -126,7 +127,7 @@ app.get(
     const dbConnected = await testConnection()
     res.json({
       message: 'Server is running',
-      bootstrapped: !app.locals.bootstrapError,
+      bootstrapped: app.locals.dbReady && !app.locals.bootstrapError,
       bootstrapError: app.locals.bootstrapError,
       database: dbConnected ? 'connected' : 'disconnected',
     })
@@ -134,7 +135,22 @@ app.get(
 )
 
 app.use('/api', async (req, res, next) => {
-  if (!app.locals.bootstrapError || req.path === '/health') {
+  if (req.path === '/health') {
+    return next()
+  }
+
+  if (!app.locals.dbReady) {
+    if (app.locals.bootstrapError) {
+      return res.status(503).json({
+        error: `Database is unavailable: ${app.locals.bootstrapError}`,
+      })
+    }
+    return res.status(503).json({
+      error: 'Server is starting — database connection in progress. Retry in a few seconds.',
+    })
+  }
+
+  if (!app.locals.bootstrapError) {
     return next()
   }
 
@@ -149,6 +165,7 @@ app.use('/api', async (req, res, next) => {
   try {
     await bootstrapDataStores()
     app.locals.bootstrapError = null
+    app.locals.dbReady = true
     return next()
   } catch (err) {
     app.locals.bootstrapError = err.message || app.locals.bootstrapError
@@ -1301,8 +1318,17 @@ app.use((err, _req, res, _next) => {
 })
 
 async function startServer() {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running on http://localhost:${PORT}`)
+    console.log(`Database: ${process.env.DB_NAME || 'not configured'}`)
+    console.log(`DB connect timeout: ${process.env.DB_CONNECT_TIMEOUT_MS || 5000}ms`)
+  })
+
   try {
     await bootstrapDataStores()
+    app.locals.dbReady = true
+    app.locals.bootstrapError = null
+    console.log('Database connected and data stores loaded.')
   } catch (err) {
     app.locals.bootstrapError = err.message || 'Unknown bootstrap error'
     if (isRateLimitDbError(err)) {
@@ -1310,14 +1336,8 @@ async function startServer() {
     } else {
       console.error('Server started in degraded mode:', app.locals.bootstrapError)
     }
+    console.log('API will return 503 responses until database connectivity is restored.')
   }
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://localhost:${PORT}`)
-    console.log(`Database: ${process.env.DB_NAME || 'not configured'}`)
-    if (app.locals.bootstrapError) {
-      console.log('API will return 503 responses until database connectivity is restored.')
-    }
-  })
 }
 
 startServer()

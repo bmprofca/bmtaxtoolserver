@@ -34,6 +34,9 @@ function resolveDbHost() {
   return configured
 }
 
+const CONNECT_TIMEOUT_MS = Number(process.env.DB_CONNECT_TIMEOUT_MS || 5_000)
+const QUERY_MAX_ATTEMPTS = Number(process.env.DB_QUERY_MAX_ATTEMPTS || 2)
+
 const pool = mysql.createPool({
   host: resolveDbHost(),
   port: Number(process.env.DB_PORT || 3306),
@@ -45,7 +48,7 @@ const pool = mysql.createPool({
   queueLimit: 0,
   enableKeepAlive: true,
   keepAliveInitialDelay: 10_000,
-  connectTimeout: 20_000,
+  connectTimeout: CONNECT_TIMEOUT_MS,
   maxIdle: 60_000,
   idleTimeout: 60_000,
 })
@@ -79,8 +82,9 @@ function formatDbConfigError(err) {
   const host = resolveDbHost()
   const missing = []
   if (!process.env.DB_USER) missing.push('DB_USER')
-  if (!process.env.DB_PASSWORD) missing.push('DB_PASSWORD')
   if (!process.env.DB_NAME) missing.push('DB_NAME')
+  const isLocalHost = host === 'localhost' || host === '127.0.0.1'
+  if (!isLocalHost && !process.env.DB_PASSWORD) missing.push('DB_PASSWORD')
   if (missing.length) {
     return `Missing environment variables: ${missing.join(', ')}. Check server/.env`
   }
@@ -122,7 +126,7 @@ export function getPool() {
 }
 
 export async function query(sql, params = [], attempt = 1) {
-  const maxAttempts = 4
+  const maxAttempts = QUERY_MAX_ATTEMPTS
   try {
     const [rows] = await pool.query(sql, params)
     return rows
@@ -135,9 +139,18 @@ export async function query(sql, params = [], attempt = 1) {
   }
 }
 
-export async function testConnection() {
+function withTimeout(promise, timeoutMs, label = 'Database operation') {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs)
+    }),
+  ])
+}
+
+export async function testConnection(timeoutMs = CONNECT_TIMEOUT_MS) {
   try {
-    const [rows] = await pool.query('SELECT 1 AS ok')
+    const [rows] = await withTimeout(pool.query('SELECT 1 AS ok'), timeoutMs, 'Database ping')
     return rows[0]?.ok === 1
   } catch {
     return false
@@ -145,12 +158,22 @@ export async function testConnection() {
 }
 
 export async function verifyConnection() {
-  if (!process.env.DB_USER || !process.env.DB_PASSWORD || !process.env.DB_NAME) {
-    throw new Error(formatDbConfigError())
+  const host = resolveDbHost()
+  const isLocalHost = host === 'localhost' || host === '127.0.0.1'
+  const missing = []
+  if (!process.env.DB_USER) missing.push('DB_USER')
+  if (!process.env.DB_NAME) missing.push('DB_NAME')
+  if (!isLocalHost && !process.env.DB_PASSWORD) missing.push('DB_PASSWORD')
+  if (missing.length) {
+    throw new Error(`Missing environment variables: ${missing.join(', ')}. Check server/.env`)
   }
 
   try {
-    const [rows] = await pool.query('SELECT 1 AS ok')
+    const [rows] = await withTimeout(
+      pool.query('SELECT 1 AS ok'),
+      CONNECT_TIMEOUT_MS,
+      'Database connection',
+    )
     if (rows[0]?.ok !== 1) {
       throw new Error('Database ping failed')
     }
