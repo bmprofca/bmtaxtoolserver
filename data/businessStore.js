@@ -21,6 +21,16 @@ export function isProprietorshipType(type) {
     .toLowerCase() === 'proprietorship'
 }
 
+export function isSelfBusinessType(type) {
+  return String(type || '')
+    .trim()
+    .toLowerCase() === 'self'
+}
+
+export function usesClientPanFallback(type) {
+  return isProprietorshipType(type) || isSelfBusinessType(type)
+}
+
 function rowToBusiness(row) {
   return {
     id: row.id,
@@ -57,7 +67,7 @@ export function serializeBusiness(business) {
 }
 
 function resolveBusinessPan({ type, pan, clientPan }) {
-  const resolved = isProprietorshipType(type) ? pan || clientPan : pan
+  const resolved = usesClientPanFallback(type) ? pan || clientPan : pan
   return normalizePan(resolved)
 }
 
@@ -148,11 +158,43 @@ export async function getBusinessesMapForClients(clientIds) {
 }
 
 async function getClientPan(clientId) {
+  const profile = await getClientBusinessProfile(clientId)
+  return profile?.pan || ''
+}
+
+async function getClientBusinessProfile(clientId) {
   const rows = await query(
-    'SELECT pan FROM clients WHERE id = ? AND is_deleted = 0 LIMIT 1',
+    'SELECT name, pan, address, pin FROM clients WHERE id = ? AND is_deleted = 0 LIMIT 1',
     [clientId],
   )
-  return rows[0]?.pan || ''
+
+  if (!rows.length) {
+    return null
+  }
+
+  const row = rows[0]
+  const address = String(row.address || '').trim()
+  const pin = String(row.pin || '').trim()
+  const addressParts = [address, pin ? `PIN ${pin}` : ''].filter(Boolean)
+
+  return {
+    name: String(row.name || '').trim(),
+    pan: String(row.pan || '').trim(),
+    address: addressParts.join(', '),
+  }
+}
+
+function applySelfBusinessDefaults(payload, clientProfile) {
+  if (!isSelfBusinessType(payload.type) || !clientProfile) {
+    return payload
+  }
+
+  return {
+    ...payload,
+    name: payload.name?.trim() || clientProfile.name,
+    pan: payload.pan?.trim() || clientProfile.pan,
+    address: payload.address?.trim() || clientProfile.address,
+  }
 }
 
 function buildActor(user) {
@@ -317,12 +359,18 @@ async function persistBusinessLegacy(business) {
 }
 
 export async function addBusiness(clientId, payload, actor) {
-  const clientPan = await getClientPan(clientId)
-  if (!clientPan && isProprietorshipType(payload.type)) {
-    return { success: false, error: 'Client PAN is required for proprietorship businesses' }
+  const clientProfile = await getClientBusinessProfile(clientId)
+  const clientPan = clientProfile?.pan || ''
+  const normalizedPayload = applySelfBusinessDefaults(payload, clientProfile)
+
+  if (!clientPan && usesClientPanFallback(normalizedPayload.type)) {
+    return {
+      success: false,
+      error: 'Client PAN is required for self and proprietorship businesses',
+    }
   }
 
-  const validation = validateBusinessPayload(payload, clientPan)
+  const validation = validateBusinessPayload(normalizedPayload, clientPan)
   if (!validation.valid) {
     return { success: false, error: validation.error }
   }

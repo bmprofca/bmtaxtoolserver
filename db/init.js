@@ -210,8 +210,13 @@ export async function initDatabase() {
 
   await migrateLedgersTable()
 
-  const { migrateLedgersFromSettings } = await import('../data/ledgerStore.js')
+  const { migrateLedgersFromSettings, ensureRoundOffAdjustmentLedger } = await import('../data/ledgerStore.js')
   await migrateLedgersFromSettings()
+  try {
+    await ensureRoundOffAdjustmentLedger()
+  } catch (err) {
+    console.warn('Round Off Adjustment ledger seed skipped:', err?.message || err)
+  }
 
   await query(`
     CREATE TABLE IF NOT EXISTS udin_records (

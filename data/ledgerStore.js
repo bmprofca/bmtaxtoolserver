@@ -478,6 +478,97 @@ export async function createLedger(payload, actor) {
   }
 }
 
+export async function ensureRoundOffAdjustmentLedger(actor) {
+  const ROUND_OFF_LEDGER_ID = 'round-off-adjustment'
+  const ROUND_OFF_LEDGER_NAME = 'Round Off Adjustment'
+
+  await reloadActiveLedgers()
+
+  const activeById = getLedgers().find((ledger) => ledger.id === ROUND_OFF_LEDGER_ID)
+  if (activeById) {
+    return activeById
+  }
+
+  const activeByName = getLedgers().find(
+    (ledger) =>
+      ledger.group === 'otherAdministrativeExpenses' &&
+      ledgerNamesMatch(ledger.name, ROUND_OFF_LEDGER_NAME),
+  )
+  if (activeByName) {
+    return activeByName
+  }
+
+  const existingRows = await query(
+    `SELECT ${LEDGER_COLUMNS} FROM ledgers WHERE id = ? LIMIT 1`,
+    [ROUND_OFF_LEDGER_ID],
+  )
+  if (existingRows.length) {
+    const row = existingRows[0]
+    if (row.is_deleted === 1 || row.is_deleted === true) {
+      const { userId, username, name } = buildActor(actor)
+      await query(
+        `UPDATE ledgers
+         SET name = ?,
+             note_group = ?,
+             sign = ?,
+             is_deleted = 0,
+             deleted_at = NULL,
+             updated_by_user_id = ?,
+             updated_by_username = ?,
+             updated_by_name = ?,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [
+          ROUND_OFF_LEDGER_NAME,
+          'otherAdministrativeExpenses',
+          'add',
+          userId,
+          username,
+          name,
+          ROUND_OFF_LEDGER_ID,
+        ],
+      )
+    }
+    await reloadActiveLedgers()
+    const restored = getLedgers().find((item) => item.id === ROUND_OFF_LEDGER_ID)
+    if (restored) {
+      return restored
+    }
+    return serializeLedger(rowToLedger(row))
+  }
+
+  const ledger = normalizeLedger({
+    id: ROUND_OFF_LEDGER_ID,
+    name: ROUND_OFF_LEDGER_NAME,
+    group: 'otherAdministrativeExpenses',
+  })
+
+  try {
+    const sortOrder = getLedgers().length
+    await insertLedgerRow(ledger, sortOrder, actor)
+  } catch (err) {
+    const message = String(err?.message || '')
+    if (err?.code !== 'ER_DUP_ENTRY' && !message.includes('Duplicate entry')) {
+      throw err
+    }
+    await reloadActiveLedgers()
+    const fallback =
+      getLedgers().find((item) => item.id === ROUND_OFF_LEDGER_ID) ||
+      getLedgers().find(
+        (item) =>
+          item.group === 'otherAdministrativeExpenses' &&
+          ledgerNamesMatch(item.name, ROUND_OFF_LEDGER_NAME),
+      )
+    if (fallback) {
+      return fallback
+    }
+    throw err
+  }
+
+  await reloadActiveLedgers()
+  return getLedgers().find((item) => item.id === ledger.id) || ledger
+}
+
 export async function saveLedgers(ledgers, actor) {
   const normalized = (ledgers || [])
     .map(normalizeLedger)
